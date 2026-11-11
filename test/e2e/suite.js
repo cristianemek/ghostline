@@ -210,6 +210,32 @@ async function run() {
     assert.equal(items?.length, 1);
   });
 
+  await step('tras aceptar: no se vuelve a pedir en el mismo punto hasta la siguiente tecla', async () => {
+    const doc = await open('src/accept.ts');
+    const before = api.today().requests;
+    const items = await ask(doc, 0, endOf(doc, 0));
+    assert.equal(items?.length, 1);
+    // What accepting does: the text goes into the document, then the item's command runs.
+    const insert = async (text) => {
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(doc.uri, new vscode.Position(0, endOf(doc, 0)), text);
+      await vscode.workspace.applyEdit(edit);
+      await sleep(50);
+    };
+    await insert(items[0].insertText);
+    await vscode.commands.executeCommand('ghostline._accepted', items[0].command.arguments[0]);
+    assert.equal(await ask(doc, 0, endOf(doc, 0)), undefined);
+    assert.equal(api.today().requests, before + 1);
+    // Elsewhere in the file nothing is held back, and the manual trigger always asks.
+    assert.equal((await ask(doc, 1, endOf(doc, 1)))?.length, 1);
+    await ask(doc, 0, endOf(doc, 0), INVOKE);
+    assert.equal(api.today().requests, before + 3);
+    await insert(' ');
+    assert.equal((await ask(doc, 0, endOf(doc, 0)))?.length, 1);
+    assert.equal(api.today().requests, before + 4);
+    await open('src/sample.ts');
+  });
+
   await step('log: una línea por petición, con tiempos y tokens, sin el contenido del archivo', async () => {
     const requestLines = api.logLines().filter((line) => /^\[\d\d:\d\d:\d\d\] #\d+ /.test(line));
     assert.ok(requestLines.length >= 4, `solo ${requestLines.length} líneas`);
@@ -557,6 +583,19 @@ async function run() {
       assert.ok(!lastPrompt().includes('vaultName'), 'la firma de un archivo excluido llegó al prompt');
       await sleep(400);
     }
+    // The cursor inside a literal opened on the line above: the type named there comes with its
+    // members (names and types), read by ghostline through the language server.
+    prompt = '';
+    for (let attempt = 0; attempt < 4 && !prompt.includes('ReportOptions {'); attempt++) {
+      api.provider.clearCache();
+      assert.equal((await ask(uses, 10, 2))?.length, 1);
+      prompt = lastPrompt();
+      if (!prompt.includes('ReportOptions {')) await sleep(400);
+    }
+    assert.ok(
+      prompt.includes('<symbols>\nexport interface ReportOptions { title: string; taxRate: number; currency?: string }  // src/lib.ts\n</symbols>'),
+      `campos inesperados: ${prompt.slice(0, 300)}`,
+    );
     await setting('context.symbols', false);
     await setting('debug.logPrompts', false);
   });

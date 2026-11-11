@@ -171,6 +171,9 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
   private refreshAt = 0;
   /** Where the user's last hand-typed insertion ended; null after any other kind of edit. */
   private typedAt: { documentKey: string; offset: number } | null = null;
+  /** Edits seen in the active document; tells whether anything was typed since a suggestion was taken. */
+  private edits = 0;
+  private afterAccept: { documentKey: string; edits: number; tail: string } | null = null;
   private nextId = 1;
   /** A suggestion dismissed sooner than this was never really seen. */
   minVisibleMs = 750;
@@ -203,6 +206,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
    */
   noteKeystroke(documentKey?: string, typedEnd?: number): void {
     this.typing.record(Date.now());
+    this.edits++;
     this.typedAt = documentKey !== undefined && typedEnd !== undefined ? { documentKey, offset: typedEnd } : null;
   }
 
@@ -334,6 +338,19 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     // 4. Rules that only apply to automatic triggering.
     if (!manual) {
       if (config.disabledLanguages.includes(languageId)) return undefined;
+      // Right after a suggestion is taken the model has just said all it had for this spot: in real
+      // use, asking again there came back empty. The next keystroke lifts this. (With speculation
+      // on, that follow-up is exactly the bet that was asked for.)
+      const taken = this.afterAccept;
+      if (
+        config.speculation === 'off' &&
+        taken !== null &&
+        taken.documentKey === documentKey &&
+        taken.edits === this.edits &&
+        linePrefix.endsWith(taken.tail)
+      ) {
+        return undefined;
+      }
       if (codeAfter) {
         // In the middle of a line only right where the user has just typed something by hand: an
         // insertion in front of existing code ("conversation, |c.queries.Create(…)"). Deleting,
@@ -694,6 +711,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       this.acceptedAt = Date.now();
       // What is in the document now was suggested, not typed: no follow-up request in mid-line.
       this.typedAt = null;
+      this.afterAccept = { documentKey: live.documentKey, edits: this.edits, tail: live.text.slice(live.text.lastIndexOf('\n') + 1) };
       deps.usage.recordAccepted();
       deps.learning?.onAccepted(live);
     } else if (outcome === 'ignorada') {

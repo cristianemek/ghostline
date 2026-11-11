@@ -1,7 +1,9 @@
 # Fase 3 — Contexto de símbolos vía LSP
 
-Opcional y **desactivada por defecto** (`ghostline.context.symbols`), porque es la única función que envía
-algo que no está en el documento actual: la línea de firma de símbolos definidos en otros archivos.
+`ghostline.context.symbols`. Es la única función que envía algo que no está en el documento actual: la
+declaración de símbolos definidos en otros archivos. Nació opcional y desactivada; **desde la v0.7.0 está
+activada por defecto** y trae también los campos de los tipos (ver el final de esta página). Se apaga con
+`"ghostline.context.symbols": false`.
 
 ## Qué hace
 
@@ -37,3 +39,46 @@ dos veces cada uno:
   bloque del archivo, y la de `src/secretStore.ts` (excluido por `*secret*`) no llega nunca.
 - No se ha medido en lote contra el modelo real: el script `bench` corre fuera de VS Code y no tiene servidor
   de lenguaje.
+
+## v0.7.0: los campos de los tipos, y la línea que abrió la llamada
+
+En uso real (Go, código generado por sqlc) el modelo respondía «nada» justo tras
+`gen.CreateConversationParams{`, y en la línea siguiente se inventaba los campos: el struct está en otro
+archivo y la línea de firma (`type CreateConversationParams struct`) no los dice.
+
+**No se le da al modelo una herramienta para leer archivos.** Lo lee ghostline:
+
+| | Herramienta de lectura para el modelo | Lo que hace ghostline |
+|---|---|---|
+| Peticiones a la API por sugerencia | 2 o más (pedir el archivo, leerlo, responder) | 1 |
+| Tokens | El prompt entero otra vez por cada vuelta, más el archivo leído | +91 en la prueba de abajo |
+| Espera | +0,6 s como poco por cada vuelta | Ninguna: la búsqueda cabe en la pausa de tecleo |
+| Qué se lee | Lo que el modelo decida; un comentario en el código podría pedirle un `.env` | Solo la definición que señala el servidor de lenguaje, nunca de un archivo excluido |
+
+Dos cambios:
+
+1. **Declaración con miembros.** Si la definición es un struct, una interfaz, un tipo objeto o un enum **de
+   este proyecto**, se envían también sus miembros en una línea: nombres y tipos, nunca valores (se quitan los
+   valores de los enum, los valores por defecto y las etiquetas de los struct de Go). Hasta 16 miembros y 480
+   caracteres; los cuerpos anidados se pliegan a `{…}`. Las clases y los objetos no cuentan: llevan código y
+   valores. De definiciones de fuera del área de trabajo (librería estándar, tipos del lenguaje) se sigue
+   enviando solo la línea de firma.
+2. **La línea que abrió la llamada o el literal.** Si en la línea del cursor no hay 3 identificadores, se
+   buscan también en la línea, hasta 12 más arriba, que dejó abierto el paréntesis, corchete o llave en el que
+   está el cursor: `…CreateConversationParams{` cuando estás escribiendo los campos. Una llave que abre un
+   bloque de código (`if … {`, `func … {`, `=> {`) no cuenta.
+
+Con la CLI real, sobre el archivo real, el cursor en la línea vacía tras `…CreateConversationParams{`, tres
+veces cada uno:
+
+| | Tokens de entrada | Líneas sugeridas | Campos que existen en el struct |
+|---|---|---|---|
+| Sin símbolos | 1.921 | 2–3 | 3 de 8 (se inventa `ConversationID` e `Identity`) |
+| Con símbolos | 2.012 (+91) | 6, las tres veces | 18 de 18 |
+
+Con símbolos, 3 de las 6 líneas eran idénticas a las que se escribieron a mano; las otras tres tenían el campo
+correcto con un valor más simple (`in.Timezone` donde iba `cmp.Or(in.Timezone, …)`).
+
+Prueba e2e: con el servidor de TypeScript real, el cursor en la línea vacía de
+`export const options: ReportOptions = {` lleva al prompt
+`export interface ReportOptions { title: string; taxRate: number; currency?: string }  // src/lib.ts`.

@@ -68,7 +68,19 @@ fs.writeFileSync(
 // Phase 3: a symbol defined in another file, and one defined in a file that is excluded.
 fs.writeFileSync(
   path.join(workspace, 'src', 'lib.ts'),
-  'export function computeTotal(items: number[], taxRate: number): number {\n  return items.reduce((sum, item) => sum + item, 0) * (1 + taxRate);\n}\n',
+  [
+    'export function computeTotal(items: number[], taxRate: number): number {',
+    '  return items.reduce((sum, item) => sum + item, 0) * (1 + taxRate);',
+    '}',
+    '',
+    'export interface ReportOptions {',
+    '  /** Shown at the top. */',
+    '  title: string;',
+    '  taxRate: number; // percent',
+    '  currency?: string;',
+    '}',
+    '',
+  ].join('\n'),
 );
 fs.writeFileSync(
   path.join(workspace, 'src', 'secretStore.ts'),
@@ -77,7 +89,7 @@ fs.writeFileSync(
 fs.writeFileSync(
   path.join(workspace, 'src', 'usesLib.ts'),
   [
-    "import { computeTotal } from './lib';",
+    "import { computeTotal, type ReportOptions } from './lib';",
     "import { loadSecretKey } from './secretStore';",
     '',
     'export function report(values: number[]): number {',
@@ -86,8 +98,15 @@ fs.writeFileSync(
     '  return total;',
     '}',
     '',
+    // The cursor goes on the empty line inside the literal: the type is named on the line above.
+    'export const options: ReportOptions = {',
+    '  ',
+    '};',
+    '',
   ].join('\n'),
 );
+// A line to accept a suggestion on.
+fs.writeFileSync(path.join(workspace, 'src', 'accept.ts'), 'const first = \nconst second = \n');
 fs.writeFileSync(
   path.join(workspace, 'src', 'many.js'),
   Array.from({ length: 60 }, (_, i) => `const value${i} = ${i};`).join('\n') + '\n',
@@ -104,7 +123,9 @@ fs.writeFileSync(path.join(workspace, 'src', 'seen.py'), Array.from({ length: 10
 fs.mkdirSync(path.join(root, 'user-data', 'User'), { recursive: true });
 fs.writeFileSync(
   path.join(root, 'user-data', 'User', 'settings.json'),
-  JSON.stringify({ 'ghostline.debounceMs': 0, 'editor.insertSpaces': true, 'editor.tabSize': 2 }, null, 2),
+  // Symbol context is on by default; here the user has switched it off, and the repository below
+  // must not be able to switch it back on. The symbols step turns it on for itself.
+  JSON.stringify({ 'ghostline.debounceMs': 0, 'ghostline.context.symbols': false, 'editor.insertSpaces': true, 'editor.tabSize': 2 }, null, 2),
 );
 // What a hostile repository would ship: every one of these tries to make ghostline send or spend
 // more than the user configured, and must be ignored.

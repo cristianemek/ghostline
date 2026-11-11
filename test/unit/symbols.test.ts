@@ -1,7 +1,95 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildPrompt, DEFAULT_LIMITS } from '../../src/completion/promptBuilder';
-import { extractSignature, formatSymbols, pickIdentifiers } from '../../src/context/symbolText';
+import { enclosingOpener, extractSignature, formatSymbols, pickIdentifiers } from '../../src/context/symbolText';
+
+test('type declarations bring their members: names and types, never values', () => {
+  // The struct from the session that prompted this (sqlc output).
+  const go = [
+    'type CreateConversationParams struct {',
+    '\tChannel      Channel',
+    '\tProfile      string',
+    '\tIdentityType IdentityType',
+    '\tIdentityID   string `json:"identity_id"`',
+    '\tOriginPage   pgtype.Text // nullable',
+    '\tTimezone     string',
+    '}',
+    '',
+    'func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error) {',
+  ];
+  assert.equal(
+    extractSignature(go, 0),
+    'type CreateConversationParams struct { Channel Channel; Profile string; IdentityType IdentityType; IdentityID string; OriginPage pgtype.Text; Timezone string }',
+  );
+  // Asked not to (a definition outside the workspace): the head only, as before.
+  assert.equal(extractSignature(go, 0, false), 'type CreateConversationParams struct');
+
+  const ts = [
+    'export interface ReportOptions extends Base {',
+    '  /** Shown at the top. */',
+    '  title: string;',
+    '  taxRate: number; // percent',
+    '  currency?: string;',
+    '  address: {',
+    '    street: string;',
+    '  };',
+    '  onDone: (total: number) => void;',
+    '}',
+  ];
+  assert.equal(
+    extractSignature(ts, 0),
+    'export interface ReportOptions extends Base { title: string; taxRate: number; currency?: string; address: {…}; onDone: (total: number) => void }',
+  );
+  assert.equal(extractSignature(['type Filters = {', '  from: Date;', '  to: Date;', '};'], 0), 'type Filters = { from: Date; to: Date }');
+  assert.equal(
+    extractSignature(['pub enum Shape {', '    Circle { radius: f64 },', '    Square(f64),', '}'], 0),
+    'pub enum Shape { Circle { radius: f64 }; Square(f64) }',
+  );
+  // Values assigned inside a type body stay behind.
+  assert.equal(
+    extractSignature(['export enum Keys {', '  Live = "sk-live-0123456789abcdef",', '  Test = 2,', '}'], 0),
+    'export enum Keys { Live; Test }',
+  );
+});
+
+test('type declarations: only real type bodies, cut short when long', () => {
+  // A class or an object holds code and values, not just a shape.
+  assert.equal(extractSignature(['export class Store {', '  private token = "abc";', '}'], 0), 'export class Store');
+  assert.equal(extractSignature(['const type = {', '  apiKey: "sk-live-0123456789",', '};'], 0), 'const type');
+  assert.equal(extractSignature(['export const config = {', '  retries: 3,', '};'], 0), 'export const config');
+  // No body in sight: the head.
+  assert.equal(extractSignature(['export interface Order {'], 0), 'export interface Order');
+  const many = ['interface Big {', ...Array.from({ length: 30 }, (_, i) => `  field${i}: string;`), '}'];
+  const cut = extractSignature(many, 0);
+  assert.ok(cut.includes('field15: string; … }'), cut);
+  assert.ok(!cut.includes('field16'), cut);
+  const wide = ['interface Wide {', ...Array.from({ length: 10 }, (_, i) => `  field${i}: ${'VeryLongTypeName'.repeat(5)};`), '}'];
+  assert.ok(extractSignature(wide, 0).length <= 480);
+  // The body runs past what was read.
+  assert.equal(extractSignature(['struct Point {', '    x: f64,', '    y: f64,'], 0), 'struct Point { x: f64; y: f64; … }');
+});
+
+test('the call or literal the cursor is inside of, when it was opened further up', () => {
+  const call = '\t\tconversation, err := c.queries.CreateConversation(ctx, gen.CreateConversationParams{';
+  assert.deepEqual(enclosingOpener([call], '\t\t\t'), { linesUp: 1, character: call.length - 1 });
+  assert.deepEqual(enclosingOpener([call, '\t\t\tChannel: in.Channel,', '\t\t\tProfile: pick(a, b),'], '\t\t\tTimezone: '), {
+    linesUp: 3,
+    character: call.length - 1,
+  });
+  assert.deepEqual(enclosingOpener(['  const total = computeTotal('], '    order.items,'), { linesUp: 1, character: 28 });
+  assert.deepEqual(enclosingOpener(['const options: ReportOptions = {'], '  '), { linesUp: 1, character: 31 });
+  assert.deepEqual(enclosingOpener(['  return {'], '    '), { linesUp: 1, character: 9 });
+  // Opened on the cursor's own line: nothing to add.
+  assert.equal(enclosingOpener([call], '\t\t\tOriginPage: pgtype.Text{String: '), undefined);
+  // A block of code is not a value being filled in.
+  assert.equal(enclosingOpener(['  if (ready) {'], '    '), undefined);
+  assert.equal(enclosingOpener(['func (c *core) open(ctx context.Context) (gen.Conversation, error) {'], '\t'), undefined);
+  assert.equal(enclosingOpener(['  items.forEach((item) => {'], '    '), undefined);
+  assert.equal(enclosingOpener(['export class Store {'], '  '), undefined);
+  // Closed again before the cursor, or nothing open at all.
+  assert.equal(enclosingOpener(['  run({', '    a: 1,', '  });'], '  '), undefined);
+  assert.equal(enclosingOpener([], '  '), undefined);
+});
 
 test('identifiers: up to three, closest to the cursor first, with their columns', () => {
   const line = '  const total = computeTotal(order.items, taxRate, ';

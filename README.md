@@ -27,7 +27,7 @@ latencia después (la spec original ponía la latencia por delante de la calidad
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.6.1.vsix
+code --install-extension ghostline-0.7.0.vsix
 ```
 
 ## Uso
@@ -57,6 +57,7 @@ code --install-extension ghostline-0.6.1.vsix
 | Presupuesto calibrado con el consumo real | El contexto se recorta para que la petición entera ronde los 1.900 tokens de entrada. |
 | Debounce, caché LRU (200 entradas, 5 min) y typeahead | Si sigues tecleando lo sugerido o vuelves al mismo sitio, 0 tokens. |
 | Corte anticipado de la respuesta | Si el modelo se alarga o empieza a explicar, se mata el proceso. |
+| Sin petición justo tras aceptar | El modelo acaba de decir lo que tenía para ese punto; en uso real, volver a preguntar ahí devolvía vacío (3 de 11 peticiones). La siguiente tecla lo reactiva. |
 | Límite diario (`ghostline.dailyRequestLimit`) | Al alcanzarlo se pausa el modo auto; el manual sigue. |
 
 ## Lo que aprende de ti
@@ -99,17 +100,20 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 | `ghostline.promptCache` | `"auto"` | `auto`: off en `single-use`, on en `persistent`. |
 | `ghostline.context.prefixLines` | `60` | |
 | `ghostline.context.suffixLines` | `20` | |
-| `ghostline.context.symbols` | `false` | Firma de hasta 3 símbolos de la línea, vía servidor de lenguaje. |
+| `ghostline.context.symbols` | `true` | Declaración de hasta 3 símbolos (firma, o los campos de un struct o interfaz del proyecto), vía servidor de lenguaje. `false`: solo se envía el archivo actual. |
 | `ghostline.learning.examples` | `true` | Guardar y enviar ejemplos de lo aceptado. |
 | `ghostline.learning.adaptiveTrigger` | `true` | Silenciar 24 h los contextos donde casi nunca aceptas. |
 | `ghostline.debug.logPrompts` | `false` | |
 
 ## Privacidad y seguridad
 
-- Solo se envía contexto del **documento actual**: hasta 60 líneas antes y 20 después del cursor. Dos
-  excepciones, ambas bajo tu control: el comando de aprender el estilo (envía el principio de los archivos que
-  confirmas) y `ghostline.context.symbols`, desactivado por defecto (envía la línea de firma de símbolos
-  definidos en otros archivos; con ella el modelo deja de inventarse los argumentos de una llamada).
+- Se envía contexto del **documento actual**: hasta 60 líneas antes y 20 después del cursor. Dos excepciones,
+  ambas bajo tu control: el comando de aprender el estilo (envía el principio de los archivos que confirmas) y
+  `ghostline.context.symbols`, activado por defecto desde la v0.7.0. Este envía la declaración de hasta 3
+  símbolos definidos en otros archivos: la línea de firma o, para un struct, interfaz, tipo objeto o enum del
+  proyecto, sus campos (nombres y tipos, nunca valores). Con ella el modelo deja de inventarse los argumentos
+  de una llamada y los campos de un struct ([`docs/fase-3.md`](docs/fase-3.md)). Lo lee ghostline con el
+  servidor de lenguaje, no el modelo.
 - **Archivos excluidos**: nunca se sugiere en ellos (tampoco en manual), nunca se envían y nunca se guarda nada de ellos.
   Por defecto: `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `*secret*`,
   `*credential*` (archivos y carpetas), `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `.aws/**`, `.ssh/**`,

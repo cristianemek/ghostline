@@ -132,7 +132,8 @@ export function readConfig(): GhostlineConfig {
     midLine: user('midLine') !== false && workspace('midLine').every((value) => value !== false),
     prefixLines: Math.min(prefixLines, ...workspace('context.prefixLines').map((value) => Math.floor(number(value, prefixLines, 1)))),
     suffixLines: Math.min(suffixLines, ...workspace('context.suffixLines').map((value) => Math.floor(number(value, suffixLines)))),
-    symbolContext: user('context.symbols') === true,
+    // On unless the user switches it off; a workspace can switch it off, never on.
+    symbolContext: user('context.symbols') !== false && workspace('context.symbols').every((value) => value !== false),
     learningExamples: user('learning.examples') !== false,
     adaptiveTrigger: user('learning.adaptiveTrigger') !== false,
     logPrompts: user('debug.logPrompts') === true,

@@ -39,6 +39,19 @@ De las 7 que respondieron: 3 aceptadas, 2 ignoradas, 2 vacías. Coste equivalent
 | La siguiente tecla podía matar la petición | Se aprovecha mientras lo tecleado coincida | Lo ya pagado no se tira. |
 | Las cortadas no contaban | Se anotan aparte como «sin confirmar» | El tooltip enseña el consumo posible, no solo el confirmado. |
 
+## Segunda sesión (v0.6.0) y qué cambió en la v0.7.0
+
+11 peticiones en 6 minutos (frente a 19 en 3 con la v0.5.0), 4 aceptadas. Tres de las 11 se lanzaron justo
+después de aceptar una sugerencia, en el mismo punto: dos volvieron vacías y la tercera se ignoró. Desde la
+v0.7.0, con `speculation: off`, tras aceptar no se pide nada ahí hasta la siguiente tecla.
+
+En sentido contrario, la v0.7.0 activa el contexto de símbolos (`docs/fase-3.md`): unas 90 tokens más en las
+peticiones donde hay una definición que traer (+5 %), a cambio de que no se invente campos ni argumentos.
+
+Frente al límite de la suscripción, medido el 11-nov-2026 con los porcentajes que da la propia CLI: un punto
+de la ventana de 5 horas equivale a unas 3.200 sugerencias y uno de la semanal a unas 24.000, suponiendo que
+el medidor pondera cada modelo por su precio de API. El tope de 1.500 peticiones al día ronda el 0,5 %.
+
 ## Si quieres gastar aún menos
 
 - **Modo manual**: `ghostline.triggerMode: "manual"` y `Alt+\`. Solo se pide cuando tú lo dices; ninguna
