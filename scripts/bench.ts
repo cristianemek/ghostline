@@ -4,14 +4,20 @@
 //
 //   npm run bench -- [--n 12] [--mode single-use|persistent] [--model haiku] [--effort low]
 //                    [--gap 1200] [--cache on|off] [--verbose]
+//                    [--style]     learn this repo's style profile first and send it with every request
+//                    [--examples]  feed back each original line as an accepted example (Phase 2 few-shot)
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
+import { buildCliArgs, buildCliEnv } from '../src/cli/args';
 import { resolveCli } from '../src/cli/resolveCli';
 import { totalInputTokens, type InitInfo, type RateLimitInfo } from '../src/cli/streamParser';
+import { CliWorker } from '../src/cli/worker';
 import { WorkerPool, type WorkerMode } from '../src/cli/workerPool';
 import { postprocess, shouldStopEarly } from '../src/completion/postprocess';
 import { DEFAULT_LIMITS, buildPrompt } from '../src/completion/promptBuilder';
+import { DEFAULT_SELECT, ExampleStore } from '../src/learning/exampleStore';
+import { buildStylePrompt, cleanStyleGuide, pickStyleFiles } from '../src/learning/styleProfile';
 import { TokenEstimator } from '../src/usage/tokenEstimator';
 import { percentile } from '../src/usage/usageTracker';
 
@@ -27,6 +33,8 @@ const effort = option('effort', 'low');
 const gapMs = Number(option('gap', '1200'));
 const cache = option('cache', mode === 'persistent' ? 'on' : 'off') === 'on';
 const verbose = process.argv.includes('--verbose');
+const withStyle = process.argv.includes('--style');
+const withExamples = process.argv.includes('--examples');
 // --env KEY=VALUE (repeatable): extra environment for the CLI processes, to compare configurations.
 const extraEnv = Object.fromEntries(
   process.argv.flatMap((arg, index) => (arg === '--env' ? [(process.argv[index + 1] ?? '').split('=', 2) as [string, string]] : [])),
@@ -99,6 +107,35 @@ function makeSamples(total: number): Sample[] {
   return samples;
 }
 
+/** Same flow as the "Aprender estilo del proyecto" command, without the UI. */
+async function learnStyle(command: string, cwd: string): Promise<string> {
+  const root = process.cwd();
+  const candidates = sourceFiles(join(root, 'src')).map((path) => ({
+    path: relative(root, path).replace(/\\/g, '/'),
+    size: statSync(path).size,
+  }));
+  const picked = pickStyleFiles(candidates);
+  const files = picked.map((candidate) => ({ path: candidate.path, content: readFileSync(join(root, candidate.path), 'utf8') }));
+  const prompt = buildStylePrompt(files);
+  const worker = new CliWorker({
+    command,
+    args: buildCliArgs({ model, effort: 'low', systemPromptFile: resolve('resources', 'style-system-prompt.txt') }),
+    cwd,
+    env: buildCliEnv(process.env, { promptCache: false }),
+  });
+  const result = await worker.runTurn(prompt, { timeoutMs: 60_000 });
+  if (worker.alive) worker.retire();
+  if (result.status !== 'ok') throw new Error(`perfil de estilo: ${result.status} ${result.errorMessage ?? ''}`);
+  const guide = cleanStyleGuide(result.text);
+  console.log(`perfil de estilo: ${files.length} archivos (${files.map((file) => file.path).join(', ')})`);
+  console.log(
+    `  entrada ${totalInputTokens(result.usage)} tokens (${prompt.length} car.) · salida ${result.usage.outputTokens} · ` +
+      `${Math.round(result.totalMs)} ms · ${result.costUsd.toFixed(5)} $ · perfil de ${guide.length} caracteres`,
+  );
+  console.log(guide.split('\n').map((line) => `  | ${line}`).join('\n') + '\n');
+  return guide;
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const round = (value: number | null | undefined): string => (value === undefined || value === null ? '–' : String(Math.round(value)));
 
@@ -139,6 +176,10 @@ async function main(): Promise<void> {
   if (Object.keys(extraEnv).length > 0) console.log(`entorno extra: ${JSON.stringify(extraEnv)}`);
   console.log('');
 
+  const styleProfile = withStyle ? await learnStyle(resolved.command, cwd) : undefined;
+  const memory = new Map<string, unknown>();
+  const examples = new ExampleStore({ get: <T>(key: string) => memory.get(key) as T | undefined, update: (key, value) => void memory.set(key, value) });
+  let requestsWithExamples = 0;
   const samples = makeSamples(count);
   const totals: number[] = [];
   const firstTokens: number[] = [];
@@ -160,16 +201,23 @@ async function main(): Promise<void> {
       languageId: 'typescript',
       prefix: sample.prefix,
       suffix: sample.suffix,
+      styleProfile,
+      examples: withExamples
+        ? examples.select('typescript', sample.prefix.split('\n').slice(-6).join('\n'), { ...DEFAULT_SELECT, charsPerToken: estimator.charsPerToken })
+        : undefined,
       limits: {
         ...DEFAULT_LIMITS,
-        fileTargetTokens: Math.max(300, TARGET_TOTAL - estimator.overheadTokens),
+        targetTokens: Math.max(300, TARGET_TOTAL - estimator.overheadTokens),
         charsPerToken: estimator.charsPerToken,
       },
     });
     const outcome = await pool.request(built.text, {
       shouldStop: (text) => shouldStopEarly(text, { maxLines: 6, prefix: built.prefix, languageId: 'typescript' }),
     });
-    const label = `#${String(index + 1).padStart(2)} ${sample.kind.padEnd(14)}`;
+    if (built.examplesUsed > 0) requestsWithExamples++;
+    // As if the user had accepted the right completion here: it becomes an example for later requests.
+    if (withExamples) examples.add('typescript', sample.prefix.split('\n').slice(-6).join('\n'), sample.expected);
+    const label = `#${String(index + 1).padStart(2)} ${sample.kind.padEnd(14)}${built.examplesUsed > 0 ? ` +${built.examplesUsed}ej` : '    '}`;
     if (outcome.status !== 'ok') {
       failures++;
       console.log(`${label} ${outcome.status}: ${outcome.errorMessage ?? ''}`);
@@ -220,6 +268,7 @@ async function main(): Promise<void> {
   console.log(`coste equivalente  ${cost.toFixed(5)} $ en total · ${(cost / Math.max(1, totals.length)).toFixed(6)} $ por petición`);
   console.log(`sugerencias        ${shown} con texto · ${exact} con la primera línea idéntica al original`);
   console.log(`calibración        ${estimator.charsPerToken.toFixed(2)} caracteres/token · sobrecarga ${Math.round(estimator.overheadTokens)} tokens`);
+  if (withExamples) console.log(`ejemplos           ${requestsWithExamples} de ${samples.length} peticiones llevaron ejemplos · ${examples.count()} guardados`);
   if (init) console.log(`init               modelo ${init.model} · apiKeySource ${init.apiKeySource} · tools ${init.tools.length} · mcp ${init.mcpServers.length}`);
   if (rateLimit) {
     const windows = Object.entries(rateLimit.windows).map(([name, window]) => `${name} ${Math.round(window.utilization * 100)}%`);

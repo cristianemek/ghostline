@@ -160,6 +160,77 @@ async function run() {
     assert.ok(api.logLines().some((line) => line.includes('apiKeySource none')));
   });
 
+  // --- Fase 2 -----------------------------------------------------------------------------------
+
+  const lastPrompt = () => {
+    const lines = api.logLines().filter((line) => / prompt \(\d+ caracteres/.test(line));
+    return lines[lines.length - 1] ?? '';
+  };
+
+  await step('ejemplos: lo aceptado se guarda en local y se envía como ejemplo en código parecido', async () => {
+    await setting('debug.logPrompts', true);
+    const orders = await open('src/orders.ts');
+    const before = api.exampleCount();
+    const first = await ask(orders, 2, endOf(orders, 2));
+    assert.equal(first?.length, 1);
+    assert.ok(!lastPrompt().includes('<examples>'), 'no debería haber ejemplos todavía');
+    await vscode.commands.executeCommand('ghostline._accepted', first[0].command.arguments[0]);
+    assert.equal(api.exampleCount(), before + 1);
+
+    const second = await ask(orders, 7, endOf(orders, 7));
+    assert.equal(second?.length, 1);
+    const prompt = lastPrompt();
+    assert.ok(prompt.includes('<examples>'), 'el prompt no lleva ejemplos');
+    assert.ok(prompt.includes('<accepted>a + b;</accepted>'), 'falta el texto aceptado');
+    assert.ok(prompt.includes('orderService.list(filters);'), 'falta el contexto del ejemplo');
+    // The examples come before the file, as the spec orders the blocks.
+    assert.ok(prompt.indexOf('<examples>') < prompt.indexOf('<file path='));
+  });
+
+  await step('perfil de estilo: se genera con la CLI, se guarda y va primero en cada prompt', async () => {
+    const before = api.today().requests;
+    const guide = await api.learnStyleFrom([path.join(workspace, 'src', 'sample.ts'), path.join(workspace, 'src', 'orders.ts')]);
+    assert.equal(guide, 'a + b;');
+    assert.equal(api.styleProfile(), 'a + b;');
+    assert.equal(api.today().requests, before + 1);
+    assert.ok(api.logLines().some((line) => line.includes('perfil de estilo generado a partir de 2 archivos')));
+
+    const sampleAgain = await open('src/sample.ts');
+    const items = await ask(sampleAgain, 12, endOf(sampleAgain, 12));
+    assert.equal(items?.length, 1);
+    const prompt = lastPrompt();
+    const body = prompt.slice(prompt.indexOf('\n') + 1);
+    assert.ok(body.startsWith('<style>\na + b;\n</style>\n'), `el bloque estable no va primero: ${body.slice(0, 60)}`);
+  });
+
+  await step('perfil de estilo: un archivo excluido nunca se envía', async () => {
+    const before = api.today().requests;
+    await assert.rejects(api.learnStyleFrom([path.join(workspace, '.env.local')]), /ningún archivo utilizable/);
+    assert.equal(api.today().requests, before);
+  });
+
+  await step('disparo adaptativo: tras 40 sugerencias ignoradas deja de disparar ahí; el manual sigue', async () => {
+    await setting('debug.logPrompts', false);
+    const many = await open('src/many.js');
+    let shown = 0;
+    let line = 0;
+    for (; line < 50; line++) {
+      const items = await ask(many, line, endOf(many, line));
+      if (!items) break;
+      shown++;
+    }
+    assert.equal(shown, 40, `se mostraron ${shown} sugerencias antes de silenciar`);
+    const before = api.today().requests;
+    assert.equal(await ask(many, line + 1, endOf(many, line + 1)), undefined);
+    assert.equal(api.today().requests, before);
+    assert.ok(api.logLines().some((entry) => entry.includes('disparo adaptativo') && entry.includes('javascript')));
+    const manual = await ask(many, line + 1, endOf(many, line + 1), INVOKE);
+    assert.equal(manual?.length, 1);
+    // Another language is not affected.
+    const sampleAgain = await open('src/sample.ts');
+    assert.equal((await ask(sampleAgain, 2, endOf(sampleAgain, 2)))?.length, 1);
+  });
+
   fs.writeFileSync(process.env.GHOSTLINE_E2E_RESULT, JSON.stringify({ steps }));
   const failed = steps.filter((item) => !item.ok);
   if (failed.length > 0) throw new Error(`${failed.length} comprobaciones fallidas`);

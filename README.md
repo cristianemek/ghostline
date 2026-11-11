@@ -7,7 +7,7 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 
 - Especificación: [`docs/SPEC.md`](docs/SPEC.md)
 - Verificación de la CLI y medidas iniciales: [`docs/paso-0.md`](docs/paso-0.md)
-- Cifras y decisiones de cada fase: [`docs/fase-1.md`](docs/fase-1.md)
+- Cifras y decisiones de cada fase: [`docs/fase-1.md`](docs/fase-1.md), [`docs/fase-2.md`](docs/fase-2.md)
 
 ## Requisitos
 
@@ -21,7 +21,7 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.1.0.vsix
+code --install-extension ghostline-0.2.0.vsix
 ```
 
 ## Uso
@@ -49,6 +49,21 @@ code --install-extension ghostline-0.1.0.vsix
 | Corte anticipado de la respuesta | Si el modelo se alarga o empieza a explicar, se mata el proceso. |
 | Límite diario (`ghostline.dailyRequestLimit`) | Al alcanzarlo se pausa el modo auto; el manual sigue. |
 
+## Lo que aprende de ti
+
+No se entrena ningún modelo: ghostline se adapta con datos guardados solo en este equipo.
+
+- **Ejemplos**: recuerda las últimas 200 sugerencias que aceptas por lenguaje y envía hasta 2 parecidas a lo
+  que estás escribiendo.
+- **Perfil de estilo**: *ghostline: Aprender estilo del proyecto* envía el principio de hasta 5 archivos que tú
+  confirmas y guarda una guía de ~200 tokens que puedes editar. Se añade a las peticiones en archivos nuevos o
+  cortos, donde no hay código del que deducir el estilo.
+- **Disparo adaptativo**: si en un contexto (por ejemplo, TypeScript tras un punto) aceptas menos del 10 % de
+  las últimas 40 sugerencias, deja de sugerir ahí 24 h y te avisa. El modo manual sigue.
+- **Aviso de velocidad**: si la latencia mediana del día supera 1,5 s, propone el modo manual o reducir el contexto.
+
+*ghostline: Borrar lo aprendido en este proyecto* lo elimina todo.
+
 ## Ajustes
 
 | Ajuste | Por defecto | |
@@ -70,7 +85,8 @@ code --install-extension ghostline-0.1.0.vsix
 | `ghostline.promptCache` | `"auto"` | `auto`: off en `single-use`, on en `persistent`. |
 | `ghostline.context.prefixLines` | `60` | |
 | `ghostline.context.suffixLines` | `20` | |
-| `ghostline.learning.examples` | `true` | Fase 2. |
+| `ghostline.learning.examples` | `true` | Guardar y enviar ejemplos de lo aceptado. |
+| `ghostline.learning.adaptiveTrigger` | `true` | Silenciar 24 h los contextos donde casi nunca aceptas. |
 | `ghostline.debug.logPrompts` | `false` | |
 
 ## Privacidad y seguridad

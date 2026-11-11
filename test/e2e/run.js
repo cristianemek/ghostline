@@ -50,6 +50,25 @@ fs.writeFileSync(
     '',
   ].join('\n'),
 );
+fs.writeFileSync(
+  path.join(workspace, 'src', 'orders.ts'),
+  [
+    'export async function listOrders(filters: Filters) {',
+    '  const orders = await orderService.list(filters);',
+    '  return ',
+    '}',
+    '',
+    'export async function listOpenOrders(filters: Filters) {',
+    '  const orders = await orderService.list(filters);',
+    '  return ',
+    '}',
+    '',
+  ].join('\n'),
+);
+fs.writeFileSync(
+  path.join(workspace, 'src', 'many.js'),
+  Array.from({ length: 60 }, (_, i) => `const value${i} = ${i};`).join('\n') + '\n',
+);
 fs.writeFileSync(path.join(workspace, '.env.local'), 'E2E_FAKE_TOKEN=not-a-real-secret\nOTHER=1\n');
 fs.writeFileSync(path.join(workspace, 'notes.md'), '# Notes\n\nSome text\n');
 fs.writeFileSync(
