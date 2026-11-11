@@ -102,6 +102,45 @@ test('sentences are kept where sentences belong', () => {
   assert.equal(run('for item in items if item is not None:', '    '), 'for item in items if item is not None:');
 });
 
+test('real model outputs from the benchmark that used to slip through', () => {
+  // Thinking out loud with the answer at the end.
+  assert.equal(
+    run(
+      'options.push(...)? No, the loop following is pushing into options array with `start` initialized. Completion: `0;`',
+      '  let start = ',
+    ),
+    '0;',
+  );
+  // The whole line wrapped in backticks, with the code's own backticks escaped.
+  assert.equal(
+    run('`  return \\`${pad(value)}:${pad(time.getMinutes())}:${pad(time.getSeconds())}\\`;`', 'function clock(time: Date): string {\n  '),
+    'return `${pad(value)}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;',
+  );
+  // Indentation written as escape sequences.
+  assert.equal(run("\\s\\s\\s'csv',", "  'ini',\n  "), "'csv',");
+  // A whole block from just above the cursor repeated before the new line.
+  assert.equal(
+    run(
+      'onShown(): void {\n    // Nothing to learn until the suggestion is accepted or passed over.\n  }\n\n  onAccepted(suggestion: SuggestionInfo): void {',
+      '  onShown(): void {\n    // Nothing to learn until the suggestion is accepted or passed over.\n  }\n\n  ',
+    ),
+    'onAccepted(suggestion: SuggestionInfo): void {',
+  );
+  // Explanations that do not start with a capital letter.
+  assert.equal(
+    run('the value is computed above, so nothing is needed here. The loop already handles every case correctly.', '  '),
+    '',
+  );
+});
+
+test('a template literal where a value is expected is not mistaken for markdown', () => {
+  assert.equal(run('`Hello ${name}`', 'const greeting = '), '`Hello ${name}`');
+  assert.equal(run('`${base}/orders`', 'fetch('), '`${base}/orders`');
+  assert.equal(run('`total: ${total}`', '  return '), '`total: ${total}`');
+  // …but a statement on a line of its own cannot be one: that is the model quoting its answer.
+  assert.equal(run('`const a = 1;`', '  '), 'const a = 1;');
+});
+
 test('the echoed cursor marker is removed', () => {
   assert.equal(run('a + b<cursor/>', 'return '), 'a + b');
 });

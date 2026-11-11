@@ -136,6 +136,24 @@ async function learnStyle(command: string, cwd: string): Promise<string> {
   return guide;
 }
 
+const GRADES = ['idéntica', 'casi', 'distinta', 'vacía'] as const;
+type Grade = (typeof GRADES)[number];
+
+/**
+ * How close the first suggested line is to the line that was really there:
+ * identical; "casi" = it starts the same way for most of the line, or it is the right line cut short
+ * (what a user would accept and finish by hand); different; or nothing suggested.
+ */
+function gradeOf(got: string, expected: string): Grade {
+  if (!got) return 'vacía';
+  if (got === expected) return 'idéntica';
+  let common = 0;
+  while (common < got.length && common < expected.length && got[common] === expected[common]) common++;
+  const startsAlike = common / expected.length >= 0.6;
+  const rightButShort = expected.startsWith(got) && got.length >= expected.length * 0.4;
+  return startsAlike || rightButShort ? 'casi' : 'distinta';
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const round = (value: number | null | undefined): string => (value === undefined || value === null ? '–' : String(Math.round(value)));
 
@@ -192,6 +210,8 @@ async function main(): Promise<void> {
   let cacheRead = 0;
   let cacheWrite = 0;
   let thinking = 0;
+  const emptyTally = (): Record<Grade, number> => ({ idéntica: 0, casi: 0, distinta: 0, vacía: 0 });
+  const grades: Record<Sample['kind'], Record<Grade, number>> = { 'línea nueva': emptyTally(), 'mitad de línea': emptyTally() };
 
   pool.warm();
   await sleep(gapMs);
@@ -244,10 +264,13 @@ async function main(): Promise<void> {
       const firstLine = text.split('\n')[0]?.trim() ?? '';
       const hit = firstLine !== '' && firstLine === sample.expected.trim();
       if (hit) exact++;
+      const grade = gradeOf(firstLine, sample.expected.trim());
+      const tally = grades[sample.kind];
+      tally[grade]++;
       console.log(
         `${label} entrada ${String(input).padStart(4)} (${built.chars} car.) · salida ${String(outcome.usage.outputTokens).padStart(3)} · ` +
           `1.er token ${round(outcome.firstTokenMs).padStart(4)} ms · total ${round(outcome.totalMs).padStart(4)} ms · ` +
-          `proceso de ${round(outcome.workerAgeMs)} ms${outcome.numTurns > 1 ? ` · ${outcome.numTurns} turnos` : ''}${outcome.stoppedEarly ? ' · cortada' : ''} ${hit ? '· =' : ''}`,
+          `proceso de ${round(outcome.workerAgeMs)} ms${outcome.numTurns > 1 ? ` · ${outcome.numTurns} turnos` : ''}${outcome.stoppedEarly ? ' · cortada' : ''} · ${grade}`,
       );
       if (verbose) {
         console.log(`     esperado: ${JSON.stringify(sample.expected.slice(0, 100))}`);
@@ -267,6 +290,11 @@ async function main(): Promise<void> {
   console.log(`caché              leídos ${cacheRead} · escritos ${cacheWrite} · razonamiento ${thinking}`);
   console.log(`coste equivalente  ${cost.toFixed(5)} $ en total · ${(cost / Math.max(1, totals.length)).toFixed(6)} $ por petición`);
   console.log(`sugerencias        ${shown} con texto · ${exact} con la primera línea idéntica al original`);
+  for (const kind of ['línea nueva', 'mitad de línea'] as const) {
+    const tally = grades[kind];
+    const total = GRADES.reduce((sum, grade) => sum + tally[grade], 0);
+    console.log(`acierto ${kind.padEnd(14)} ${GRADES.map((grade) => `${grade} ${tally[grade]}`).join(' · ')}  (de ${total})`);
+  }
   console.log(`calibración        ${estimator.charsPerToken.toFixed(2)} caracteres/token · sobrecarga ${Math.round(estimator.overheadTokens)} tokens`);
   if (withExamples) console.log(`ejemplos           ${requestsWithExamples} de ${samples.length} peticiones llevaron ejemplos · ${examples.count()} guardados`);
   if (init) console.log(`init               modelo ${init.model} · apiKeySource ${init.apiKeySource} · tools ${init.tools.length} · mcp ${init.mcpServers.length}`);

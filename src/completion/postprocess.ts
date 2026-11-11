@@ -104,17 +104,47 @@ function lastLine(text: string): string {
   return text.slice(text.lastIndexOf('\n') + 1);
 }
 
-/** Keeps only the code when the model wrapped its answer in a markdown fence or backticks. */
-export function stripCodeFences(text: string): string {
+/** The line so far ends where a value is expected, so a backtick-quoted answer may be a template literal. */
+const EXPECTS_EXPRESSION = /(?:[=(,:+\-*/%<>!&|?[{]|\breturn|\bawait|\byield|\bthrow)\s*$/;
+
+/**
+ * Keeps only the code when the model wrapped its answer in a markdown fence or backticks.
+ * `lineContent` is what is already typed on the current line: after "const msg = " an answer in
+ * backticks is a template literal and must be left alone.
+ */
+export function stripCodeFences(text: string, lineContent = ''): string {
   const fenced = /```[^\n`]*\n([\s\S]*?)\n?[ \t]*```/.exec(text);
   if (fenced) return fenced[1] ?? '';
   let out = text;
   // Opening fence with no closing one (cut-off answer), or a stray closing fence.
   out = out.replace(/^\s*```[^\n`]*\n/, '');
   out = out.replace(/\n?[ \t]*```\s*$/, '');
-  const inline = /^`([^`\n]+)`$/.exec(out.trim());
-  if (inline) return inline[1] ?? '';
+  // `code` — and, when the code has backticks of its own, the model escapes them: `a \`b\` c`.
+  const inline = /^`((?:\\`|[^`\n])+)`$/.exec(out.trim());
+  if (inline) {
+    const content = inline[1] ?? '';
+    // Where a value is expected, backticks around an interpolation are a real template literal.
+    const templateLiteral = EXPECTS_EXPRESSION.test(lineContent) && content.includes('${');
+    if (!templateLiteral) return content.replace(/\\`/g, '`');
+  }
   return out;
+}
+
+/** Prose as a whole (not line by line): mostly plain words. */
+function mostlyWords(text: string): boolean {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 5) return false;
+  return words.filter((word) => /^[A-Za-z][A-Za-z'’-]*[,.:;!?]?$/.test(word)).length / words.length >= 0.6;
+}
+
+/**
+ * "…so the loop pushes into the array. Completion: `0;`" — the model thought out loud and put the
+ * answer at the end. Keep the answer.
+ */
+function extractMarkedAnswer(text: string): string {
+  const marked = /(?:completion|answer|output|result|insert(?:ion)?)\s*(?:is\s*)?:?\s*`((?:\\`|[^`\n])+)`\.?\s*$/i.exec(text);
+  if (!marked || !mostlyWords(text.slice(0, marked.index))) return text;
+  return (marked[1] ?? '').replace(/\\`/g, '`');
 }
 
 function isChatter(text: string, lineContent: string): boolean {
@@ -127,13 +157,20 @@ function isChatter(text: string, lineContent: string): boolean {
   return CHATTER.some((pattern) => pattern.test(trimmed));
 }
 
-/** An English sentence rather than code: capitalised, mostly plain words, with sentence punctuation. */
+/** An English sentence rather than code: mostly plain words, with sentence punctuation. */
 function looksLikeProse(line: string): boolean {
   const trimmed = line.trim();
-  if (!/^[A-Z]/.test(trimmed) || COMMENT_START.test(trimmed)) return false;
-  if (!/[.!?:]$/.test(trimmed) && !/[.!?] [A-Z]/.test(trimmed)) return false;
+  if (COMMENT_START.test(trimmed)) return false;
   const words = trimmed.split(/\s+/);
-  if (words.length < 6) return false;
+  const boundary = /[.!?] [A-Z]/.test(trimmed);
+  if (/^[A-Z]/.test(trimmed)) {
+    if (words.length < 6 || (!/[.!?:]$/.test(trimmed) && !boundary)) return false;
+  } else if (words.length < 10 || !boundary) {
+    // Not capitalised ("options.push(...)? No, the loop that follows is…"): only a long line with
+    // one sentence ending and another starting is taken for prose, so that English-looking code
+    // (SQL, Python, shell) is not.
+    return false;
+  }
   const plain = words.filter((word) => /^[A-Za-z][A-Za-z'’-]*[,.:;!?]?$/.test(word)).length;
   return plain / words.length >= 0.8;
 }
@@ -214,20 +251,30 @@ function removePrefixOverlap(text: string, linePrefix: string): string {
   return text;
 }
 
-/** Drops a first line that just repeats the last line already in the file. */
-function removeRepeatedPreviousLine(text: string, prefix: string): string {
+/**
+ * Drops the start of a completion that just repeats the lines already in the file right above the
+ * cursor (one line, or a whole block before getting to the new code).
+ */
+function removeRepeatedPreviousLines(text: string, prefix: string): string {
   const previous = prefix
     .slice(0, Math.max(0, prefix.lastIndexOf('\n')))
     .split('\n')
-    .reverse()
-    .find((line) => line.trim() !== '');
-  if (!previous) return text;
-  const target = previous.trim();
-  if (target.length < 10) return text;
-  const newline = text.indexOf('\n');
-  const first = newline < 0 ? text : text.slice(0, newline);
-  if (first.trim() !== target) return text;
-  return newline < 0 ? '' : text.slice(newline + 1).replace(/^[ \t]+/, '');
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (previous.length === 0) return text;
+  const lines = text.split('\n');
+  const content = lines.flatMap((line, index) => (line.trim() ? [index] : []));
+  for (let count = Math.min(content.length, previous.length, 8); count >= 1; count--) {
+    const mine = content.slice(0, count).map((index) => (lines[index] as string).trim());
+    const theirs = previous.slice(-count);
+    // Short repeats ("}", "break;") are legitimate code.
+    if (mine.join('').length < 10 || !mine.every((line, i) => line === theirs[i])) continue;
+    return lines
+      .slice((content[count - 1] as number) + 1)
+      .join('\n')
+      .replace(/^\s+/, '');
+  }
+  return text;
 }
 
 /** Number of brackets the text opens and leaves open. */
@@ -400,7 +447,10 @@ export function postprocess(input: PostprocessInput): string {
   const tabSize = Math.max(1, indent.tabSize);
 
   let text = input.raw.replace(/\r\n?/g, '\n');
-  text = stripCodeFences(text).replace(/<cursor\s*\/>/g, '');
+  text = extractMarkedAnswer(text);
+  text = stripCodeFences(text, lineContent).replace(/<cursor\s*\/>/g, '');
+  // Indentation spelled out as escapes ("\s\s\s'csv',") instead of real whitespace.
+  text = text.replace(/^(?:\\[st])+/, '');
   if (isChatter(text, lineContent)) return '';
   text = cutAtProse(text, prefix, lineContent, input.languageId).replace(/\s+$/, '');
   if (!text.trim()) return '';
@@ -408,7 +458,7 @@ export function postprocess(input: PostprocessInput): string {
   if (lineContent === '') {
     // The cursor already sits at the line's indentation.
     text = text.replace(/^\s+/, '');
-    text = removeRepeatedPreviousLine(text, prefix);
+    text = removeRepeatedPreviousLines(text, prefix);
   } else {
     const blankLead = /^(?:[ \t]*\n)+/.exec(text);
     if (blankLead) {
