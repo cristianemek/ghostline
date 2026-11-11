@@ -19,7 +19,6 @@ import {
   cursorAllowsAuto,
   debounceDelay,
   eagerDelay,
-  isTriggerPoint,
   wait,
   type TriggerContext,
 } from './trigger';
@@ -243,6 +242,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     token: vscode.CancellationToken,
   ): Promise<vscode.InlineCompletionItem[] | undefined> {
     const { deps } = this;
+    const calledAt = Date.now();
     const config = deps.getConfig();
     if (!config.enabled) return undefined;
     // A call we caused ourselves to show an answer that arrived late: it never starts a request.
@@ -373,7 +373,11 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       const lookUpSymbols = (): void => {
         if (config.symbolContext && deps.symbols) symbolsPending = deps.symbols(document, position, waiter.signal).catch(() => []);
       };
-      const delay = manual || waited ? 0 : this.delayFor(config, linePrefix);
+      // Time already spent waiting for a flight that turned out to be for something else counts
+      // towards the pause, but does not replace it: while the user is still typing this call is
+      // cancelled before the wait is over. (Asking at once instead chained three to five requests
+      // per line in the typing simulation.)
+      const delay = manual ? 0 : Math.max(0, this.delayFor(config, linePrefix) - (waited ? Date.now() - calledAt : 0));
       if (delay > 0) {
         if (!(await wait(delay / 2, waiter.signal))) return undefined;
         lookUpSymbols();
@@ -505,12 +509,9 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     // The user has just taken a suggestion: the next one is wanted now.
     if (now - this.acceptedAt < AFTER_ACCEPT_MS) return 0;
     // A new line is where a prediction pays off most: it covers the whole statement, and if the user
-    // starts typing what it says, it is on screen before they pause. Inside a line the same bet is
-    // placed only when asked for ("eager"): measured, it roughly doubles the tokens spent.
-    const blankLine = linePrefix.trim() === '';
-    if (blankLine || (config.speculation === 'eager' && isTriggerPoint(linePrefix))) {
-      return eagerDelay(config.debounceMs, config.eagerDebounceMs, this.typing.medianGap(now));
-    }
+    // starts typing what it says, it is on screen before they pause. The same bet inside a line
+    // (after ".", "(", "="…) was measured too: more tokens and no shorter wait, so it is not made.
+    if (linePrefix.trim() === '') return eagerDelay(config.debounceMs, config.eagerDebounceMs, this.typing.medianGap(now));
     return full;
   }
 

@@ -157,6 +157,19 @@ function isChatter(text: string, lineContent: string): boolean {
   return CHATTER.some((pattern) => pattern.test(trimmed));
 }
 
+/**
+ * The model second-guessing itself in the middle of an answer:
+ * "status === 'success') day.errors++... wait — the completion should be …".
+ */
+const SELF_TALK = /(?:\.{3}|…)\s*wait\b|\bwait\s*[—–]|\bthe (?:completion|answer|cursor) (?:should|is|would|must|sits)\b|\bno, the\b/i;
+
+/** Keeps what came before the model started talking to itself. */
+function cutAtSelfTalk(text: string, prefix: string, lineContent: string): string {
+  if (COMMENT_START.test(lineContent) || insideCommentBlock(prefix)) return text;
+  const talk = SELF_TALK.exec(text);
+  return talk ? text.slice(0, talk.index) : text;
+}
+
 /** An English sentence rather than code: mostly plain words, with sentence punctuation. */
 function looksLikeProse(line: string): boolean {
   const trimmed = line.trim();
@@ -452,6 +465,7 @@ export function postprocess(input: PostprocessInput): string {
   // Indentation spelled out as escapes ("\s\s\s'csv',") instead of real whitespace.
   text = text.replace(/^(?:\\[st])+/, '');
   if (isChatter(text, lineContent)) return '';
+  if (!(input.languageId && PROSE_LANGUAGES.has(input.languageId))) text = cutAtSelfTalk(text, prefix, lineContent);
   text = cutAtProse(text, prefix, lineContent, input.languageId).replace(/\s+$/, '');
   if (!text.trim()) return '';
 

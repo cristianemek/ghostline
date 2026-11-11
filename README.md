@@ -11,6 +11,7 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
   [`docs/fase-3.md`](docs/fase-3.md)
 - Auditoría de seguridad y robustez: [`docs/auditoria.md`](docs/auditoria.md)
 - Cuánto acierta y cómo se mide: [`docs/acierto.md`](docs/acierto.md)
+- Latencia, qué la limita y qué se hizo: [`docs/latencia.md`](docs/latencia.md)
 
 ## Requisitos
 
@@ -24,7 +25,7 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.4.0.vsix
+code --install-extension ghostline-0.5.0.vsix
 ```
 
 ## Uso
@@ -77,7 +78,9 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 | `ghostline.effort` | `"low"` | |
 | `ghostline.reasoning` | `"minimal"` | `adaptive` deja razonar al modelo: p50 ~1,6 s y +13 % de coste, sin mejora medible. |
 | `ghostline.triggerMode` | `"auto"` | `auto` \| `manual` |
-| `ghostline.debounceMs` | `350` | |
+| `ghostline.debounceMs` | `350` | Espera dentro de la línea. |
+| `ghostline.speculation` | `"line"` | `line`: se adelanta en cada línea nueva y reaprovecha la petición en curso (−23 % de espera, ~1,9x tokens). `off`: nunca se adelanta. |
+| `ghostline.eagerDebounceMs` | `120` | Espera corta en una línea vacía. |
 | `ghostline.maxLines` | `6` | |
 | `ghostline.requestTimeoutMs` | `8000` | |
 | `ghostline.dailyRequestLimit` | `1500` | 0 = sin límite. |
@@ -119,6 +122,7 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 | `npm run check` | Tipos, lint y tests unitarios/integración (CLI simulada, no gasta tokens). |
 | `npm run test:e2e` | Arranca VS Code en un perfil aislado con la CLI simulada y prueba el proveedor real. |
 | `npm run bench -- --n 20` | Mide contra la CLI real (gasta unos miles de tokens de Haiku). `--verbose` muestra las respuestas. |
+| `npm run bench:typing` | Simula tecleo real en VS Code contra la CLI real y compara la espera con y sin especulación. |
 | `npm run package` | Genera el `.vsix`. |
 
 Cero dependencias de runtime.

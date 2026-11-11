@@ -133,6 +133,24 @@ test('real model outputs from the benchmark that used to slip through', () => {
   );
 });
 
+test('the model second-guessing itself mid-answer is cut where it starts (seen in the typing simulation)', () => {
+  assert.equal(
+    run("status === 'success') day.errors++... wait — the completion should be something else entirely", '    } else if (record.'),
+    "status === 'success') day.errors++",
+  );
+  assert.equal(
+    run("status === 'success' ... wait—the chain ends with `else if (record.status` so this is wrong", '    } else if (record.'),
+    "status === 'success'",
+  );
+  assert.equal(run('return total;\nNo, the function returns void here', '  '), 'return total;');
+  // Nothing but second thoughts: nothing to show.
+  assert.equal(run('wait — the cursor is inside a string', '  '), '');
+  // Real code and comments that merely contain the word are untouched.
+  assert.equal(run('await waitFor(ready);', '  '), 'await waitFor(ready);');
+  assert.equal(run('wait - 1', 'const remaining = '), 'wait - 1');
+  assert.equal(run('wait — the queue must drain first', '  // '), 'wait — the queue must drain first');
+});
+
 test('a template literal where a value is expected is not mistaken for markdown', () => {
   assert.equal(run('`Hello ${name}`', 'const greeting = '), '`Hello ${name}`');
   assert.equal(run('`${base}/orders`', 'fetch('), '`${base}/orders`');

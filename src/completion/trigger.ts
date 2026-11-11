@@ -17,16 +17,6 @@ export function classifyContext(linePrefix: string): TriggerContext {
 }
 
 /**
- * Places where a suggestion is most wanted and a pause is most likely: a fresh line, right after
- * "." "(" "[" "{" "=" "," ":" (and an optional space), or after a keyword that starts an expression.
- * There the wait before asking is much shorter than in the middle of a word.
- */
-export function isTriggerPoint(linePrefix: string): boolean {
-  if (linePrefix.trim() === '') return true;
-  return /[.([{=,:]\s?$/.test(linePrefix) || /\b(?:return|await|new|import|from|case|throw|yield|in|of)\s$/.test(linePrefix);
-}
-
-/**
  * Whether what the user typed since a request was sent still agrees with what that request has
  * answered so far: as far as both go, they are the same text. While that holds, the request in the
  * air is worth more than a new one.

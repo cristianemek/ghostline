@@ -21,7 +21,7 @@ const KEY_MS = 95;
 const BOUNDARY_MS = 230;
 const GIVE_UP_MS = 6000;
 /** ghostline.speculation levels; "off" is the original behaviour. */
-const MODES = (process.env.GHOSTLINE_TYPING_MODES || 'off,line,eager').split(',');
+const MODES = (process.env.GHOSTLINE_TYPING_MODES || 'off,line').split(',');
 
 function pickLines(lines, count) {
   const usable = [];

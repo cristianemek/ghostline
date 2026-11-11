@@ -7,7 +7,6 @@ import {
   cursorAllowsAuto,
   debounceDelay,
   eagerDelay,
-  isTriggerPoint,
   wait,
 } from '../../src/completion/trigger';
 
@@ -29,15 +28,6 @@ test('context classification', () => {
   assert.equal(classifyContext('  foo( '), 'after-paren');
   assert.equal(classifyContext('  const x = '), 'end-of-line');
   assert.equal(classifyContext('  return'), 'end-of-line');
-});
-
-test('trigger points: where a short wait is enough', () => {
-  for (const linePrefix of ['', '    ', 'user.', 'foo(', 'foo( ', 'const x = ', 'const x =', 'items[', 'call(a, ', 'key: ', '  return ', 'const y = await ', 'for (const item of ']) {
-    assert.equal(isTriggerPoint(linePrefix), true, JSON.stringify(linePrefix));
-  }
-  for (const linePrefix of ['const', 'const resul', 'foo.ba', 'if (ready) ', 'x = a + b', 'returned ', 'value;']) {
-    assert.equal(isTriggerPoint(linePrefix), false, JSON.stringify(linePrefix));
-  }
 });
 
 test('a request in the air stays useful while the typing agrees with its answer', () => {

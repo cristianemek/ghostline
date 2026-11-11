@@ -419,7 +419,7 @@ async function run() {
     }
   });
 
-  await step('latencia: espera corta en los puntos de disparo, ninguna tras aceptar, completa en mitad de una palabra', async () => {
+  await step('latencia: espera corta en una línea vacía, ninguna tras aceptar, completa dentro de la línea', async () => {
     const pace = await open('src/pace.ts');
     await sleep(600); // let the slow processes of the previous step drain
     await ask(pace, 1, endOf(pace, 1));
@@ -435,17 +435,11 @@ async function run() {
       const midWord = await timed(4);
       assert.equal(midWord.items?.length, 1);
       assert.ok(midWord.ms >= 580, `mitad de palabra: ${midWord.ms} ms`);
-      // "const total5 = ": a trigger point inside a line. By default ("line") that is the full wait too…
+      // "const total5 = ": inside a line the wait is the full one too, even right after "=".
       const insideLine = await timed(5);
       assert.equal(insideLine.items?.length, 1);
-      assert.ok(insideLine.ms >= 580, `dentro de la línea, por defecto: ${insideLine.ms} ms`);
-      // …and with "eager" the short one.
-      await setting('speculation', 'eager');
-      const eager = await timed(7);
-      assert.equal(eager.items?.length, 1);
-      assert.ok(eager.ms >= 110 && eager.ms < 520, `dentro de la línea, eager: ${eager.ms} ms`);
-      await setting('speculation', 'line');
-      // An empty line gets the short wait by default: one bet per new line.
+      assert.ok(insideLine.ms >= 580, `dentro de la línea: ${insideLine.ms} ms`);
+      // An empty line gets the short wait: one bet per new line.
       const emptyLine = await timed(12);
       assert.equal(emptyLine.items?.length, 1);
       assert.ok(emptyLine.ms >= 110 && emptyLine.ms < 520, `línea vacía: ${emptyLine.ms} ms`);

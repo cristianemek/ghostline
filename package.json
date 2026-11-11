@@ -148,23 +148,21 @@
           "type": "string",
           "enum": [
             "off",
-            "line",
-            "eager"
+            "line"
           ],
           "enumDescriptions": [
             "Nunca se adelanta: espera siempre ghostline.debounceMs y la siguiente tecla cancela la petición en curso. Es lo que menos tokens gasta.",
-            "Se adelanta una vez por línea nueva (espera corta en una línea vacía) y mantiene viva la petición mientras lo que tecleas coincide con lo que responde.",
-            "Además usa la espera corta dentro de la línea, tras . ( [ { = , : y palabras como return. Lo más rápido y lo que más gasta."
+            "Se adelanta una vez por línea nueva (espera corta en una línea vacía), no espera tras aceptar una sugerencia y mantiene viva la petición mientras lo que tecleas coincide con lo que responde. Medido: ~23 % menos de espera mediana y ~1,9x tokens."
           ],
           "default": "line",
           "scope": "application",
-          "description": "Cuánto se adelanta ghostline a tu pausa para que la sugerencia esté antes. Más adelanto = menos espera y más tokens (medidas en docs/latencia.md)."
+          "description": "Si ghostline se adelanta a tu pausa para que la sugerencia esté antes. Menos espera a cambio de más tokens (medidas en docs/latencia.md)."
         },
         "ghostline.eagerDebounceMs": {
           "type": "number",
           "default": 120,
           "minimum": 0,
-          "description": "Espera corta que usa ghostline.speculation (en una línea vacía y, con \"eager\", en los puntos de disparo dentro de la línea). Nunca es menor que 1,6 veces tu ritmo de tecleo reciente. Si un área de trabajo indica otro valor, se usa el mayor."
+          "description": "Espera corta que se usa en una línea vacía cuando ghostline.speculation es \"line\". Nunca es menor que 1,6 veces tu ritmo de tecleo reciente. Si un área de trabajo indica otro valor, se usa el mayor."
         },
         "ghostline.maxLines": {
           "type": "number",

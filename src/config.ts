@@ -7,9 +7,11 @@ export type PromptCacheMode = 'auto' | 'on' | 'off';
 export type ReasoningMode = 'minimal' | 'adaptive';
 /**
  * How much ghostline bets on a suggestion being wanted before the user has clearly paused.
- * off: never (fewest tokens). line: once per new line. eager: also at trigger points inside a line.
+ * off: never (fewest tokens). line: once per new line, and a request in the air survives the next
+ * keystrokes while they agree with its answer. A third level that also bet inside the line was
+ * measured and dropped: more tokens, no gain.
  */
-export type Speculation = 'off' | 'line' | 'eager';
+export type Speculation = 'off' | 'line';
 
 export interface GhostlineConfig {
   enabled: boolean;
@@ -122,7 +124,7 @@ export function readConfig(): GhostlineConfig {
     recycleEvery: Math.floor(number(user('recycleEvery'), 8, 1)),
     promptCache: oneOf(user('promptCache'), ['auto', 'on', 'off'] as const, 'auto'),
     reasoning: oneOf(user('reasoning'), ['minimal', 'adaptive'] as const, 'minimal'),
-    speculation: oneOf(user('speculation'), ['off', 'line', 'eager'] as const, 'line'),
+    speculation: oneOf(user('speculation'), ['off', 'line'] as const, 'line'),
     prefixLines: Math.min(prefixLines, ...workspace('context.prefixLines').map((value) => Math.floor(number(value, prefixLines, 1)))),
     suffixLines: Math.min(suffixLines, ...workspace('context.suffixLines').map((value) => Math.floor(number(value, suffixLines)))),
     symbolContext: user('context.symbols') === true,
