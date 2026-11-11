@@ -42,6 +42,7 @@ export interface GhostlineTestApi {
   logLines(): string[];
   exampleCount(): number;
   adaptiveReport(): ContextReport[];
+  refreshCount(): number;
   config(): GhostlineConfig;
   styleProfile(): string | undefined;
   learnStyleFrom(paths: string[]): Promise<string>;
@@ -60,6 +61,7 @@ class Ghostline implements vscode.Disposable {
   private readonly excludedCache = new Map<string, boolean>();
   private readonly warnedKeySources = new Set<string>();
   private readonly shownTroubles = new Set<string>();
+  private refreshes = 0;
   private readonly cwd: string;
   private readonly flushTimer: NodeJS.Timeout;
   private config: GhostlineConfig = readConfig();
@@ -114,6 +116,13 @@ class Ghostline implements vscode.Disposable {
       log: (line) => this.log(line),
       onActivity: () => this.queueRender(),
       onTrouble: (message, pauseMs) => this.onTrouble(message, pauseMs),
+      refresh: (documentKey) => {
+        // An answer landed after the user had typed on. The inline suggestions API has no "update":
+        // asking the editor to trigger again is how the provider gets to show it now.
+        this.refreshes++;
+        if (vscode.window.activeTextEditor?.document.uri.toString() !== documentKey) return;
+        void vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+      },
       learning,
       // Phase 3, off unless "ghostline.context.symbols" is on.
       symbols: createSymbolProvider({
@@ -278,6 +287,7 @@ class Ghostline implements vscode.Disposable {
       logLines: () => [...this.logLines],
       exampleCount: () => this.examples.count(),
       adaptiveReport: () => this.adaptive.report(),
+      refreshCount: () => this.refreshes,
       config: () => this.config,
       styleProfile: () => this.style.profile,
       learnStyleFrom: (paths) => this.style.learnFrom(paths.map((file) => vscode.Uri.file(file))),

@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { TypingRate, classifyContext, cursorAllowsAuto, debounceDelay, wait } from '../../src/completion/trigger';
+import {
+  TypingRate,
+  agreesWithTyping,
+  classifyContext,
+  cursorAllowsAuto,
+  debounceDelay,
+  eagerDelay,
+  isTriggerPoint,
+  wait,
+} from '../../src/completion/trigger';
 
 test('auto mode fires at the end of the line or before closing characters only', () => {
   for (const rest of ['', '   ', ')', ');', '})', ' ]', '"', "'", '`', '"); ', '\t}']) {
@@ -22,6 +31,33 @@ test('context classification', () => {
   assert.equal(classifyContext('  return'), 'end-of-line');
 });
 
+test('trigger points: where a short wait is enough', () => {
+  for (const linePrefix of ['', '    ', 'user.', 'foo(', 'foo( ', 'const x = ', 'const x =', 'items[', 'call(a, ', 'key: ', '  return ', 'const y = await ', 'for (const item of ']) {
+    assert.equal(isTriggerPoint(linePrefix), true, JSON.stringify(linePrefix));
+  }
+  for (const linePrefix of ['const', 'const resul', 'foo.ba', 'if (ready) ', 'x = a + b', 'returned ', 'value;']) {
+    assert.equal(isTriggerPoint(linePrefix), false, JSON.stringify(linePrefix));
+  }
+});
+
+test('a request in the air stays useful while the typing agrees with its answer', () => {
+  // Nothing answered yet, or nothing typed yet: no disagreement.
+  assert.equal(agreesWithTyping('', 'res', false), true);
+  assert.equal(agreesWithTyping('result = 1;', '', false), true);
+  // As far as both go, same text.
+  assert.equal(agreesWithTyping('result = 1;', 'res', false), true);
+  assert.equal(agreesWithTyping('res', 'result = ', false), true);
+  assert.equal(agreesWithTyping('result = 1;', 'rex', false), false);
+  assert.equal(agreesWithTyping('re', 'data', false), false);
+  // Leading whitespace of the answer is dropped on a blank line, kept elsewhere.
+  assert.equal(agreesWithTyping('    return x;', 'ret', true), true);
+  assert.equal(agreesWithTyping(' 5;', '5', false), false);
+  assert.equal(agreesWithTyping(' 5;', ' 5', false), true);
+  // A markdown wrapper cannot be judged yet.
+  assert.equal(agreesWithTyping('```ts\nreturn x;', 'zzz', false), true);
+  assert.equal(agreesWithTyping('a\r\nb', 'a\nb', false), true);
+});
+
 test('typing rate: more than 6 keystrokes per second over the last 2 seconds is fast', () => {
   const rate = new TypingRate();
   // 12 keystrokes in 2 s is exactly 6/s: not fast yet.
@@ -37,6 +73,27 @@ test('typing rate: slow typing is never fast', () => {
   const rate = new TypingRate();
   for (let i = 0; i < 50; i++) rate.record(i * 300);
   assert.equal(rate.isFast(50 * 300), false);
+});
+
+test('the short wait adapts to the typing rhythm', () => {
+  // No recent typing to go by: the configured short wait.
+  assert.equal(eagerDelay(350, 120, undefined), 120);
+  // A key every 110 ms: 176 ms without one is a pause.
+  assert.equal(eagerDelay(350, 120, 110), 176);
+  // A slow typist: never longer than the normal debounce.
+  assert.equal(eagerDelay(350, 120, 300), 350);
+  // A very fast one: never shorter than the configured short wait.
+  assert.equal(eagerDelay(350, 120, 40), 120);
+  // Setting both the same switches the distinction off.
+  assert.equal(eagerDelay(350, 350, 110), 350);
+  assert.equal(eagerDelay(200, 350, undefined), 200);
+
+  const rate = new TypingRate();
+  assert.equal(rate.medianGap(0), undefined);
+  for (const stamp of [1000, 1100, 1210, 1300, 1420, 1900]) rate.record(stamp);
+  assert.equal(rate.medianGap(1900), 110);
+  // Old keystrokes fall out of the window.
+  assert.equal(rate.medianGap(5000), undefined);
 });
 
 test('debounce is longer while typing fast', () => {

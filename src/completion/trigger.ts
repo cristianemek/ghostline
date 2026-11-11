@@ -16,6 +16,31 @@ export function classifyContext(linePrefix: string): TriggerContext {
   return 'end-of-line';
 }
 
+/**
+ * Places where a suggestion is most wanted and a pause is most likely: a fresh line, right after
+ * "." "(" "[" "{" "=" "," ":" (and an optional space), or after a keyword that starts an expression.
+ * There the wait before asking is much shorter than in the middle of a word.
+ */
+export function isTriggerPoint(linePrefix: string): boolean {
+  if (linePrefix.trim() === '') return true;
+  return /[.([{=,:]\s?$/.test(linePrefix) || /\b(?:return|await|new|import|from|case|throw|yield|in|of)\s$/.test(linePrefix);
+}
+
+/**
+ * Whether what the user typed since a request was sent still agrees with what that request has
+ * answered so far: as far as both go, they are the same text. While that holds, the request in the
+ * air is worth more than a new one.
+ */
+export function agreesWithTyping(answerSoFar: string, typed: string, lineWasBlank: boolean): boolean {
+  let answer = answerSoFar.replace(/\r\n?/g, '\n');
+  // On a blank line the leading whitespace of the answer is dropped when it is shown.
+  if (lineWasBlank) answer = answer.replace(/^\s+/, '');
+  // A code fence or backtick wrapper cannot be judged until the whole answer is in.
+  if (answer.startsWith('`')) return true;
+  const length = Math.min(answer.length, typed.length);
+  return answer.slice(0, length) === typed.slice(0, length);
+}
+
 const WINDOW_MS = 2000;
 const FAST_KEYS_PER_SECOND = 6;
 
@@ -34,6 +59,19 @@ export class TypingRate {
     return this.stamps.length > FAST_KEYS_PER_SECOND * (WINDOW_MS / 1000);
   }
 
+  /**
+   * The user's current rhythm: median gap between recent keystrokes, in ms. Undefined when there are
+   * too few to tell (the cursor was just placed, or the user has been idle).
+   */
+  medianGap(now: number): number | undefined {
+    this.prune(now);
+    if (this.stamps.length < 5) return undefined;
+    const gaps: number[] = [];
+    for (let i = 1; i < this.stamps.length; i++) gaps.push((this.stamps[i] as number) - (this.stamps[i - 1] as number));
+    gaps.sort((a, b) => a - b);
+    return gaps[Math.floor(gaps.length / 2)];
+  }
+
   private prune(now: number): void {
     const cutoff = now - WINDOW_MS;
     let drop = 0;
@@ -49,6 +87,19 @@ export function debounceDelay(debounceMs: number, typingFast: boolean): number {
   // Someone typing fast who pauses briefly is most likely about to continue: wait longer before
   // spending a request on them.
   return typingFast ? debounceMs + FAST_TYPING_EXTRA_MS : debounceMs;
+}
+
+/** A gap this many times the user's usual one between keystrokes is a pause, not typing. */
+const PAUSE_FACTOR = 1.6;
+
+/**
+ * The wait at a trigger point: short, but never shorter than what tells a pause from this user's own
+ * typing rhythm. Someone typing a key every 110 ms has paused after ~180 ms; a slower typist has
+ * not, and a fixed short wait would fire a request after almost every word.
+ */
+export function eagerDelay(debounceMs: number, eagerDebounceMs: number, medianGapMs: number | undefined): number {
+  const eager = medianGapMs === undefined ? eagerDebounceMs : Math.max(eagerDebounceMs, Math.round(medianGapMs * PAUSE_FACTOR));
+  return Math.min(debounceMs, eager);
 }
 
 /** Resolves after `ms`, or earlier with `false` when the signal aborts. */

@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "publisher": "cristianemek",
   "license": "UNLICENSED",
@@ -142,7 +142,29 @@
           "type": "number",
           "default": 350,
           "minimum": 0,
-          "description": "Espera, en milisegundos, tras dejar de teclear antes de pedir una sugerencia. Si un área de trabajo indica otro valor, se usa el mayor."
+          "description": "Espera, en milisegundos, tras dejar de teclear en mitad de una palabra antes de pedir una sugerencia. Justo después de aceptar una sugerencia no se espera. Si un área de trabajo indica otro valor, se usa el mayor."
+        },
+        "ghostline.speculation": {
+          "type": "string",
+          "enum": [
+            "off",
+            "line",
+            "eager"
+          ],
+          "enumDescriptions": [
+            "Nunca se adelanta: espera siempre ghostline.debounceMs y la siguiente tecla cancela la petición en curso. Es lo que menos tokens gasta.",
+            "Se adelanta una vez por línea nueva (espera corta en una línea vacía) y mantiene viva la petición mientras lo que tecleas coincide con lo que responde.",
+            "Además usa la espera corta dentro de la línea, tras . ( [ { = , : y palabras como return. Lo más rápido y lo que más gasta."
+          ],
+          "default": "line",
+          "scope": "application",
+          "description": "Cuánto se adelanta ghostline a tu pausa para que la sugerencia esté antes. Más adelanto = menos espera y más tokens (medidas en docs/latencia.md)."
+        },
+        "ghostline.eagerDebounceMs": {
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "description": "Espera corta que usa ghostline.speculation (en una línea vacía y, con \"eager\", en los puntos de disparo dentro de la línea). Nunca es menor que 1,6 veces tu ritmo de tecleo reciente. Si un área de trabajo indica otro valor, se usa el mayor."
         },
         "ghostline.maxLines": {
           "type": "number",
@@ -304,6 +326,7 @@
     "test": "node esbuild.mjs --tests && node --test \"out/test/**/*.test.js\"",
     "test:e2e": "node esbuild.mjs && node test/e2e/run.js",
     "bench": "node esbuild.mjs --scripts && node out/scripts/bench.js",
+    "bench:typing": "node esbuild.mjs && node test/e2e/run.js --typing",
     "check": "npm run typecheck && npm run lint && npm test",
     "vscode:prepublish": "npm run build:prod",
     "package": "vsce package --no-dependencies --skip-license",

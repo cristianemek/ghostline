@@ -12,7 +12,17 @@ import { LruCache, Typeahead, completionKey, type DocumentReader } from './cache
 import type { LearningHooks, SuggestionInfo } from './hooks';
 import { postprocess, shouldStopEarly, trimAgainstSuffix, type IndentStyle } from './postprocess';
 import { DEFAULT_LIMITS, buildPrompt } from './promptBuilder';
-import { TypingRate, classifyContext, cursorAllowsAuto, debounceDelay, wait, type TriggerContext } from './trigger';
+import {
+  TypingRate,
+  agreesWithTyping,
+  classifyContext,
+  cursorAllowsAuto,
+  debounceDelay,
+  eagerDelay,
+  isTriggerPoint,
+  wait,
+  type TriggerContext,
+} from './trigger';
 
 export const ACCEPT_COMMAND = 'ghostline._accepted';
 
@@ -27,6 +37,14 @@ const MIN_FILE_TOKENS = 300;
 const SUMMARY_EVERY = 20;
 /** Lines kept as the "before" context of a suggestion (5 previous lines + the current one). */
 const BEFORE_LINES = 6;
+/** Characters before a request's cursor remembered to notice edits made above it. */
+const TAIL_CHARS = 200;
+/** The provider call caused by accepting a suggestion arrives within this time. */
+const AFTER_ACCEPT_MS = 400;
+/** How long someone who joined a flight waits for its first words before giving up on it. */
+const ADOPTION_PATIENCE_MS = 1000;
+/** How long a programmatic refresh may take to reach the provider. */
+const REFRESH_WINDOW_MS = 1000;
 
 /** Phase 3: signature lines for symbols on the current line. */
 export type SymbolProvider = (
@@ -48,6 +66,11 @@ export interface ProviderDeps {
   onActivity(): void;
   /** Automatic requests have just been paused for `pauseMs` after repeated failures. */
   onTrouble?(message: string, pauseMs: number): void;
+  /**
+   * An answer arrived after the user had typed on: ask the editor to query the provider again so it
+   * can be shown now instead of at the next pause.
+   */
+  refresh?(documentKey: string): void;
   learning?: LearningHooks;
   symbols?: SymbolProvider;
 }
@@ -60,6 +83,38 @@ interface LiveSuggestion extends SuggestionInfo {
   offset: number;
   /** Log line of the request that produced it, written once the outcome is known. */
   logEntry: RequestLogEntry | null;
+}
+
+/** An answer that is ready, anchored to where its request was made. */
+interface Arrival {
+  suggestion: SuggestionInfo;
+  /** Cursor offset when the request was sent. */
+  anchor: number;
+  /** Text right before the anchor at that moment. */
+  tail: string;
+  logEntry: RequestLogEntry | null;
+}
+
+/**
+ * A request in the air. It is no longer killed by the next keystroke: if the user keeps typing what
+ * the model is answering, the answer is still good when it lands, and it lands a whole request
+ * sooner than a new one would.
+ */
+interface Flight {
+  documentKey: string;
+  documentVersion: number;
+  startedAt: number;
+  anchor: number;
+  tail: string;
+  lineWasBlank: boolean;
+  /** Raw answer streamed so far. */
+  partial: string;
+  /** Called after every piece of the answer arrives. */
+  onPartial: Set<() => void>;
+  controller: AbortController;
+  /** Provider calls currently waiting for it. With none, the answer is kept for the next call. */
+  waiting: number;
+  done: Promise<Arrival | null>;
 }
 
 function readerFor(document: vscode.TextDocument): DocumentReader {
@@ -92,12 +147,29 @@ function lastLines(text: string, count: number): string {
   return text.split('\n').slice(-count).join('\n');
 }
 
+/** What a provider call knows about where the cursor is. */
+interface Place {
+  document: vscode.TextDocument;
+  position: vscode.Position;
+  documentKey: string;
+  offset: number;
+  read: DocumentReader;
+  prefix: string;
+  suffix: string;
+  indent: IndentStyle;
+}
+
 export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
   private readonly cache = new LruCache<string>();
   private readonly typeahead = new Typeahead();
   private readonly typing = new TypingRate();
   private readonly breaker = new FailureBreaker();
   private live: LiveSuggestion | null = null;
+  private flight: Flight | null = null;
+  /** An answer nobody was waiting for any more; shown if the typing since then agrees with it. */
+  private arrived: Arrival | null = null;
+  private acceptedAt = 0;
+  private refreshAt = 0;
   private nextId = 1;
   /** A suggestion dismissed sooner than this was never really seen. */
   minVisibleMs = 750;
@@ -134,24 +206,34 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     if (this.live?.id === id) this.resolveLive('aceptada');
   }
 
-  /** The cursor moved without an edit: whatever was showing has been dismissed. */
+  /** The cursor moved without an edit: whatever was showing, or on its way, is for somewhere else. */
   cursorMoved(document: vscode.TextDocument, position: vscode.Position): void {
+    const documentKey = document.uri.toString();
+    const offset = document.offsetAt(position);
+    const flight = this.flight;
+    if (flight && flight.documentKey === documentKey && flight.documentVersion === document.version && offset !== flight.anchor) {
+      this.abortFlight();
+    }
+    if (this.arrived && this.arrived.suggestion.documentKey === documentKey && offset < this.arrived.anchor) this.dropArrived();
     const live = this.live;
-    if (!live || live.documentKey !== document.uri.toString()) return;
+    if (!live || live.documentKey !== documentKey) return;
     // An edit is followed by a new provider call, which settles the suggestion itself.
     if (live.documentVersion !== document.version) return;
-    if (document.offsetAt(position) === live.offset) return;
+    if (offset === live.offset) return;
     this.resolveLive('ignorada');
   }
 
   /** Editor switched, extension paused… */
   dismiss(): void {
+    this.abortFlight();
+    this.dropArrived();
     this.resolveLive('ignorada');
   }
 
   clearCache(): void {
     this.cache.clear();
     this.typeahead.clear();
+    this.dropArrived();
   }
 
   private async provide(
@@ -163,8 +245,12 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     const { deps } = this;
     const config = deps.getConfig();
     if (!config.enabled) return undefined;
-    const manual = context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke;
-    if (!manual && (config.triggerMode === 'manual' || deps.isPaused())) return undefined;
+    // A call we caused ourselves to show an answer that arrived late: it never starts a request.
+    const refresh =
+      context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke && Date.now() - this.refreshAt < REFRESH_WINDOW_MS;
+    if (refresh) this.refreshAt = 0;
+    const manual = context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke && !refresh;
+    if (!manual && !refresh && (config.triggerMode === 'manual' || deps.isPaused())) return undefined;
 
     // Hard gates, manual mode included: never touch sensitive, foreign or huge documents.
     if (document.uri.scheme !== 'file' && document.uri.scheme !== 'untitled') return undefined;
@@ -187,6 +273,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     const suffix = document
       .getText(new vscode.Range(position, document.lineAt(lastLine).range.end))
       .replace(/\r\n/g, '\n');
+    const place: Place = { document, position, documentKey, offset, read, prefix, suffix, indent };
 
     // 1. Typeahead: the user is typing what was suggested. Serve the rest locally, zero tokens.
     const ahead = this.typeahead.match(documentKey, offset, read);
@@ -205,7 +292,38 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     // Anything else means the previous suggestion, if any, was not taken.
     this.resolveLive('ignorada');
 
-    // 2. Rules that only apply to automatic triggering.
+    // 2. An answer that arrived while the user was typing on: still good if the typing agrees with it.
+    if (this.arrived) {
+      const arrival = this.arrived;
+      this.arrived = null;
+      const shown = this.present(arrival, place);
+      if (shown) return shown;
+    }
+
+    // 3. A request still in the air. If what has been typed since agrees with what it is answering,
+    // wait for it: it will land long before a new request would.
+    let waited = false;
+    const flight = this.flight;
+    if (flight) {
+      if (this.flightStillFits(flight, place)) {
+        const arrival = await this.waitFor(flight, token, () => this.flightStillFits(flight, place));
+        if (arrival === 'cancelled') return undefined;
+        if (arrival === 'diverged') {
+          // Its first words already differ from what was typed: no point in waiting for the rest.
+          this.abortFlight();
+        } else if (arrival) {
+          const shown = this.present(arrival, place);
+          if (shown) return shown;
+        }
+        // It turned out to be something else (or nothing). The user has waited already: ask at once.
+        waited = true;
+      } else {
+        this.abortFlight();
+      }
+    }
+    if (refresh || token.isCancellationRequested) return undefined;
+
+    // 4. Rules that only apply to automatic triggering.
     if (!manual) {
       if (config.disabledLanguages.includes(languageId)) return undefined;
       if (!cursorAllowsAuto(restOfLine)) return undefined;
@@ -225,13 +343,13 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       text,
     });
 
-    // 3. Cache: same file, same surroundings, asked less than five minutes ago.
+    // 5. Cache: same file, same surroundings, asked less than five minutes ago.
     const key = completionKey(documentKey, prefix, suffix);
     const cached = this.cache.get(key);
     if (cached !== undefined) {
       if (!cached) return undefined;
       deps.usage.recordLocalHit();
-      return [this.show(document, position, read, describe(this.nextId++, cached), null)];
+      return this.present({ suggestion: describe(this.nextId++, cached), anchor: offset, tail: read(Math.max(0, offset - TAIL_CHARS), offset), logEntry: null }, place);
     }
 
     if (!manual && (deps.usage.overDailyLimit(config.dailyRequestLimit) || this.breaker.open)) {
@@ -242,58 +360,85 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     if (!pool) return undefined;
     pool.warm();
 
-    const versionAtStart = document.version;
-    const controller = new AbortController();
-    const subscription = token.onCancellationRequested(() => controller.abort());
-    if (token.isCancellationRequested) controller.abort();
+    // 6. Wait for the typing to settle. How long depends on where the cursor is: nothing right after
+    // accepting a suggestion, a short wait where a suggestion is most wanted, the full debounce in
+    // the middle of a word. The symbol lookup (Phase 3) shares the wait, starting halfway through so
+    // that a burst of typing does not send a query per keystroke to the language server.
+    const waiter = new AbortController();
+    const subscription = token.onCancellationRequested(() => waiter.abort());
+    if (token.isCancellationRequested) waiter.abort();
+    let symbols: string[];
     try {
-      // 4. Debounce. The symbol lookup (Phase 3) shares the wait, so it adds no latency; it starts
-      // halfway through so that a burst of typing does not send a query per keystroke to the
-      // language server.
       let symbolsPending: Promise<string[]> = Promise.resolve([]);
       const lookUpSymbols = (): void => {
-        if (config.symbolContext && deps.symbols) {
-          symbolsPending = deps.symbols(document, position, controller.signal).catch(() => []);
-        }
+        if (config.symbolContext && deps.symbols) symbolsPending = deps.symbols(document, position, waiter.signal).catch(() => []);
       };
-      if (manual) {
+      const delay = manual || waited ? 0 : this.delayFor(config, linePrefix);
+      if (delay > 0) {
+        if (!(await wait(delay / 2, waiter.signal))) return undefined;
         lookUpSymbols();
+        if (!(await wait(delay / 2, waiter.signal))) return undefined;
       } else {
-        const delay = debounceDelay(config.debounceMs, this.typing.isFast(Date.now()));
-        if (!(await wait(delay / 2, controller.signal))) return undefined;
         lookUpSymbols();
-        if (!(await wait(delay / 2, controller.signal))) return undefined;
       }
-      const symbols = await symbolsPending;
-      if (controller.signal.aborted) return undefined;
+      symbols = await symbolsPending;
+      if (waiter.signal.aborted) return undefined;
+    } finally {
+      subscription.dispose();
+    }
 
-      // 5. Prompt, sized so that the request's total input stays on target.
-      const { estimator } = deps;
-      const extras = deps.learning?.promptExtras(languageId, before) ?? {};
-      const built = buildPrompt({
-        path: promptPath(document),
-        languageId,
-        prefix,
-        suffix,
-        styleProfile: extras.styleProfile,
-        examples: config.learningExamples ? extras.examples : undefined,
-        symbols,
-        limits: {
-          ...DEFAULT_LIMITS,
-          prefixLines: config.prefixLines,
-          suffixLines: config.suffixLines,
-          targetTokens: Math.max(MIN_FILE_TOKENS, TARGET_TOTAL_INPUT_TOKENS - estimator.overheadTokens),
-          charsPerToken: estimator.charsPerToken,
+    // 7. Prompt, sized so that the request's total input stays on target.
+    const { estimator } = deps;
+    const extras = deps.learning?.promptExtras(languageId, before) ?? {};
+    const built = buildPrompt({
+      path: promptPath(document),
+      languageId,
+      prefix,
+      suffix,
+      styleProfile: extras.styleProfile,
+      examples: config.learningExamples ? extras.examples : undefined,
+      symbols,
+      limits: {
+        ...DEFAULT_LIMITS,
+        prefixLines: config.prefixLines,
+        suffixLines: config.suffixLines,
+        targetTokens: Math.max(MIN_FILE_TOKENS, TARGET_TOTAL_INPUT_TOKENS - estimator.overheadTokens),
+        charsPerToken: estimator.charsPerToken,
+      },
+    });
+
+    // 8. Request. From here on it has a life of its own: this call may be cancelled by the next
+    // keystroke, the request goes on until it answers or stops being useful.
+    const id = this.nextId++;
+    // Text after the cursor on the same line ("foo(|)"): only one line can possibly fit there.
+    const singleLine = restOfLine.trim() !== '';
+    const launched: Flight = {
+      documentKey,
+      documentVersion: document.version,
+      startedAt: Date.now(),
+      anchor: offset,
+      tail: read(Math.max(0, offset - TAIL_CHARS), offset),
+      lineWasBlank: linePrefix.trim() === '',
+      partial: '',
+      onPartial: new Set(),
+      controller: new AbortController(),
+      waiting: 0,
+      done: Promise.resolve(null),
+    };
+    this.abortFlight();
+    this.flight = launched;
+    launched.done = (async (): Promise<Arrival | null> => {
+      const outcome = await pool.request(built.text, {
+        signal: launched.controller.signal,
+        timeoutMs: config.requestTimeoutMs,
+        shouldStop: (text) => {
+          launched.partial = text;
+          for (const notify of launched.onPartial) notify();
+          if (singleLine && /\S[^\n]*\n/.test(text)) return true;
+          return shouldStopEarly(text, { maxLines: config.maxLines, prefix: built.prefix, languageId });
         },
       });
-
-      // 6. Request.
-      const id = this.nextId++;
-      const outcome = await pool.request(built.text, {
-        signal: controller.signal,
-        timeoutMs: config.requestTimeoutMs,
-        shouldStop: (text) => shouldStopEarly(text, { maxLines: config.maxLines, prefix: built.prefix, languageId }),
-      });
+      if (this.flight === launched) this.flight = null;
       const logEntry = this.account(id, outcome, built.chars, languageId, triggerContext, manual);
       logEntry.hints = [
         ...(built.styleUsed ? ['estilo'] : []),
@@ -312,11 +457,10 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
           const pauseMs = this.breaker.failure(message);
           if (pauseMs > 0) deps.onTrouble?.(message, pauseMs);
         }
-        return undefined;
+        return null;
       }
       this.breaker.success();
 
-      // 7. Clean up the answer.
       const text = postprocess({
         raw: outcome.text,
         prefix: built.prefix,
@@ -328,22 +472,146 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       this.cache.set(key, text);
       if (!text) {
         deps.log(formatRequestLine(logEntry, 'vacía'));
-        return undefined;
+        return null;
       }
-      if (token.isCancellationRequested || document.version !== versionAtStart) {
-        // Too late for this keystroke, but it stays cached for the next time the cursor is here.
-        deps.log(formatRequestLine(logEntry, 'llegó tarde (en caché)'));
-        return undefined;
+      const arrival: Arrival = { suggestion: describe(id, text), anchor: launched.anchor, tail: launched.tail, logEntry };
+      if (launched.waiting === 0) {
+        // Nobody is waiting (the user typed on): keep it, and ask the editor to come back for it.
+        this.dropArrived();
+        this.arrived = arrival;
+        this.refreshAt = Date.now();
+        deps.refresh?.(documentKey);
+        return null;
       }
-      return [this.show(document, position, read, describe(id, text), logEntry)];
-    } finally {
-      subscription.dispose();
-    }
+      return arrival;
+    })();
+
+    const arrival = await this.waitFor(launched, token);
+    if (arrival === 'cancelled' || arrival === 'diverged' || !arrival) return undefined;
+    return this.present(arrival, place);
   }
 
   /** Flushes the pending log line. */
   dispose(): void {
+    this.abortFlight();
+    this.dropArrived();
     this.resolveLive('sin resolver');
+  }
+
+  private delayFor(config: GhostlineConfig, linePrefix: string): number {
+    const now = Date.now();
+    const full = debounceDelay(config.debounceMs, this.typing.isFast(now));
+    if (config.speculation === 'off') return full;
+    // The user has just taken a suggestion: the next one is wanted now.
+    if (now - this.acceptedAt < AFTER_ACCEPT_MS) return 0;
+    // A new line is where a prediction pays off most: it covers the whole statement, and if the user
+    // starts typing what it says, it is on screen before they pause. Inside a line the same bet is
+    // placed only when asked for ("eager"): measured, it roughly doubles the tokens spent.
+    const blankLine = linePrefix.trim() === '';
+    if (blankLine || (config.speculation === 'eager' && isTriggerPoint(linePrefix))) {
+      return eagerDelay(config.debounceMs, config.eagerDebounceMs, this.typing.medianGap(now));
+    }
+    return full;
+  }
+
+  /** Same document, nothing edited above the request's cursor, and the typing since agrees with the answer so far. */
+  private flightStillFits(flight: Flight, place: Place): boolean {
+    if (flight.documentKey !== place.documentKey || place.offset < flight.anchor) return false;
+    if (place.read(Math.max(0, flight.anchor - TAIL_CHARS), flight.anchor) !== flight.tail) return false;
+    return agreesWithTyping(flight.partial, place.read(flight.anchor, place.offset), flight.lineWasBlank);
+  }
+
+  /** Waits for a flight on behalf of one provider call. The call can be cancelled; the flight cannot (by it). */
+  private async waitFor(
+    flight: Flight,
+    token: vscode.CancellationToken,
+    stillFits?: () => boolean,
+  ): Promise<Arrival | null | 'cancelled' | 'diverged'> {
+    if (token.isCancellationRequested) return 'cancelled';
+    flight.waiting++;
+    let subscription: vscode.Disposable | undefined;
+    const cancelled = new Promise<'cancelled'>((resolve) => {
+      subscription = token.onCancellationRequested(() => {
+        // Stop counting as a waiter right away, so the answer is kept if it lands a moment later.
+        flight.waiting--;
+        // Without speculation the original rule applies: the next keystroke kills the request.
+        if (this.deps.getConfig().speculation === 'off' && this.flight === flight) this.abortFlight();
+        resolve('cancelled');
+      });
+    });
+    // Someone who joined a flight started for an earlier cursor position checks each new piece of
+    // the answer against what was typed since, and leaves as soon as they disagree.
+    let listener: (() => void) | undefined;
+    let patience: NodeJS.Timeout | undefined;
+    const diverged = new Promise<'diverged'>((resolve) => {
+      if (!stillFits) return;
+      listener = () => {
+        if (!stillFits()) resolve('diverged');
+      };
+      flight.onPartial.add(listener);
+      // A flight that has said nothing a second after take-off is one where the model stopped to
+      // think: its answer is two or three seconds away. Measured: waiting for one and then finding
+      // it did not match cost 3.7 s. Better to let it go and ask afresh.
+      patience = setTimeout(() => {
+        if (flight.partial === '') resolve('diverged');
+      }, Math.max(0, ADOPTION_PATIENCE_MS - (Date.now() - flight.startedAt)));
+    });
+    try {
+      return await Promise.race([flight.done, cancelled, diverged]);
+    } finally {
+      subscription?.dispose();
+      if (listener) flight.onPartial.delete(listener);
+      if (patience) clearTimeout(patience);
+    }
+  }
+
+  private abortFlight(): void {
+    const flight = this.flight;
+    if (!flight) return;
+    this.flight = null;
+    flight.controller.abort();
+  }
+
+  private dropArrived(): void {
+    const arrival = this.arrived;
+    if (!arrival) return;
+    this.arrived = null;
+    if (arrival.logEntry) this.deps.log(formatRequestLine(arrival.logEntry, 'llegó tarde y no se usó'));
+  }
+
+  /**
+   * Shows an answer at the current cursor: the part of it that has not been typed yet. Returns
+   * undefined when what was typed since the request no longer agrees with it.
+   */
+  private present(arrival: Arrival, place: Place): vscode.InlineCompletionItem[] | undefined {
+    const { suggestion, anchor } = arrival;
+    const { deps } = this;
+    const fits =
+      suggestion.documentKey === place.documentKey &&
+      place.offset >= anchor &&
+      place.read(Math.max(0, anchor - TAIL_CHARS), anchor) === arrival.tail;
+    const typed = fits ? place.read(anchor, place.offset) : '';
+    const rest = fits && suggestion.text.startsWith(typed)
+      ? trimAgainstSuffix(suggestion.text.slice(typed.length), place.prefix, place.suffix, place.indent)
+      : '';
+    if (!rest.trim()) {
+      if (arrival.logEntry) deps.log(formatRequestLine(arrival.logEntry, 'llegó tarde y no se usó'));
+      return undefined;
+    }
+    this.live = {
+      ...suggestion,
+      documentVersion: place.document.version,
+      offset: place.offset,
+      logEntry: arrival.logEntry,
+      shownAt: Date.now(),
+    };
+    // Anchored where the request was made, so that typing on keeps being served from it.
+    this.typeahead.remember(suggestion.documentKey, anchor, place.read, suggestion.text, suggestion.id);
+    if (typed) deps.usage.recordLocalHit();
+    deps.usage.recordShown();
+    deps.learning?.onShown(suggestion);
+    deps.onActivity();
+    return [this.item(rest, place.position, suggestion.id)];
   }
 
   private account(
@@ -386,22 +654,6 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     };
   }
 
-  private show(
-    document: vscode.TextDocument,
-    position: vscode.Position,
-    read: DocumentReader,
-    suggestion: SuggestionInfo,
-    logEntry: RequestLogEntry | null,
-  ): vscode.InlineCompletionItem {
-    const offset = document.offsetAt(position);
-    this.live = { ...suggestion, documentVersion: document.version, offset, logEntry, shownAt: Date.now() };
-    this.typeahead.remember(suggestion.documentKey, offset, read, suggestion.text, suggestion.id);
-    this.deps.usage.recordShown();
-    this.deps.learning?.onShown(suggestion);
-    this.deps.onActivity();
-    return this.item(suggestion.text, position, suggestion.id);
-  }
-
   private item(text: string, position: vscode.Position, id: number): vscode.InlineCompletionItem {
     return new vscode.InlineCompletionItem(text, new vscode.Range(position, position), {
       title: 'ghostline: sugerencia aceptada',
@@ -418,6 +670,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     const { deps } = this;
     let label: string = outcome;
     if (outcome === 'aceptada') {
+      this.acceptedAt = Date.now();
       deps.usage.recordAccepted();
       deps.learning?.onAccepted(live);
     } else if (outcome === 'ignorada') {

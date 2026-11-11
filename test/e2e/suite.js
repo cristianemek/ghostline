@@ -309,6 +309,162 @@ async function run() {
     }
   });
 
+  // --- Latencia ---------------------------------------------------------------------------------
+
+  /** A provider call whose token can be cancelled, as the editor does on the next keystroke. */
+  const askCancellable = (document, line, character) => {
+    const source = new vscode.CancellationTokenSource();
+    return {
+      cancel: () => source.cancel(),
+      result: api.provider.provideInlineCompletionItems(document, new vscode.Position(line, character), AUTO, source.token),
+    };
+  };
+  const typeAt = async (document, line, text) => {
+    const edit = new vscode.WorkspaceEdit();
+    edit.insert(document.uri, new vscode.Position(line, endOf(document, line)), text);
+    await vscode.workspace.applyEdit(edit);
+  };
+
+  await step('latencia: seguir tecleando lo que el modelo responde aprovecha la petición ya lanzada', async () => {
+    const flight = await open('src/flight.ts');
+    try {
+      // New CLI processes answer after 700 ms; the one already waiting is still fast: use it up.
+      process.env.FAKE_DELAY_MS = '700';
+      assert.equal((await ask(flight, 0, endOf(flight, 0)))?.length, 1);
+
+      const before = api.today().requests;
+      const first = askCancellable(flight, 1, endOf(flight, 1));
+      await sleep(200);
+      // The user types "a +", which is how the answer ("a + b;") begins. The editor cancels the call.
+      first.cancel();
+      assert.equal(await first.result, undefined);
+      await typeAt(flight, 1, 'a +');
+      const started = Date.now();
+      const items = await ask(flight, 1, endOf(flight, 1));
+      const waited = Date.now() - started;
+      assert.equal(items?.[0]?.insertText, ' b;');
+      // One request served both positions, and it landed sooner than a new one could have.
+      assert.equal(api.today().requests, before + 1);
+      assert.ok(waited < 650, `tardó ${waited} ms`);
+    } finally {
+      delete process.env.FAKE_DELAY_MS;
+    }
+  });
+
+  await step('latencia: una respuesta que llega mientras tecleas se guarda y se pide al editor que la muestre', async () => {
+    const flight = await open('src/flight.ts');
+    try {
+      process.env.FAKE_DELAY_MS = '500';
+      assert.equal((await ask(flight, 3, endOf(flight, 3)))?.length, 1); // uses up the 700 ms process
+      assert.equal((await ask(flight, 4, endOf(flight, 4)))?.length, 1); // …and the next one waiting
+
+      const before = api.today().requests;
+      const shownBefore = api.today().shown;
+      const refreshes = api.refreshCount();
+      const first = askCancellable(flight, 5, endOf(flight, 5));
+      await sleep(100);
+      first.cancel();
+      await typeAt(flight, 5, 'a');
+      // The real cursor sits where the user stopped typing.
+      const end = new vscode.Position(5, endOf(flight, 5));
+      vscode.window.activeTextEditor.selection = new vscode.Selection(end, end);
+      // Nobody asks while the answer is on its way. When it lands, ghostline asks the editor to
+      // trigger again, and the editor itself calls the provider, which shows what is left of it.
+      await sleep(1000);
+      assert.equal(api.refreshCount(), refreshes + 1);
+      assert.equal(api.today().shown, shownBefore + 1, 'el editor no volvió a pedir la sugerencia');
+      // Typing on, or asking again, is served from it: still a single request.
+      const items = await ask(flight, 5, endOf(flight, 5));
+      assert.equal(items?.[0]?.insertText, ' + b;');
+      assert.equal(api.today().requests, before + 1);
+    } finally {
+      delete process.env.FAKE_DELAY_MS;
+      // The editor now has a real suggestion on screen and would keep asking on its own as the
+      // document changes. Close it and park the cursor where automatic requests never fire, so the
+      // remaining steps only see the calls they make themselves.
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
+      const home = new vscode.Position(0, 0);
+      vscode.window.activeTextEditor.selection = new vscode.Selection(home, home);
+      await sleep(200);
+    }
+  });
+
+  await step('latencia: si lo tecleado no coincide con la respuesta, se descarta y se pide de nuevo sin esperar', async () => {
+    const flight = await open('src/flight.ts');
+    try {
+      process.env.FAKE_DELAY_MS = '400';
+      assert.equal((await ask(flight, 7, endOf(flight, 7)))?.length, 1);
+      assert.equal((await ask(flight, 8, endOf(flight, 8)))?.length, 1);
+
+      const before = api.today().requests;
+      const first = askCancellable(flight, 9, endOf(flight, 9));
+      await sleep(100);
+      first.cancel();
+      await typeAt(flight, 9, 'zzz');
+      const items = await ask(flight, 9, endOf(flight, 9));
+      // The first answer ("a + b;") is useless after "zzz"; a second request answers for the new position.
+      assert.equal(items?.[0]?.insertText, 'a + b;');
+      assert.equal(api.today().requests, before + 2);
+      // A cursor that moves elsewhere drops whatever is in the air.
+      const moved = askCancellable(flight, 11, endOf(flight, 11));
+      await sleep(50);
+      moved.cancel();
+      const editor = vscode.window.activeTextEditor;
+      editor.selection = new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0));
+      await sleep(700);
+      assert.equal(await ask(flight, 0, 0), undefined);
+      assert.ok(api.logLines().some((line) => line.includes('cancelada')));
+    } finally {
+      delete process.env.FAKE_DELAY_MS;
+    }
+  });
+
+  await step('latencia: espera corta en los puntos de disparo, ninguna tras aceptar, completa en mitad de una palabra', async () => {
+    const pace = await open('src/pace.ts');
+    await sleep(600); // let the slow processes of the previous step drain
+    await ask(pace, 1, endOf(pace, 1));
+    await ask(pace, 3, endOf(pace, 3));
+    await setting('debounceMs', 600);
+    try {
+      const timed = async (line) => {
+        const started = Date.now();
+        const items = await ask(pace, line, endOf(pace, line));
+        return { items, ms: Date.now() - started };
+      };
+      // "const partial4": in the middle of a word, the full 600 ms.
+      const midWord = await timed(4);
+      assert.equal(midWord.items?.length, 1);
+      assert.ok(midWord.ms >= 580, `mitad de palabra: ${midWord.ms} ms`);
+      // "const total5 = ": a trigger point inside a line. By default ("line") that is the full wait too…
+      const insideLine = await timed(5);
+      assert.equal(insideLine.items?.length, 1);
+      assert.ok(insideLine.ms >= 580, `dentro de la línea, por defecto: ${insideLine.ms} ms`);
+      // …and with "eager" the short one.
+      await setting('speculation', 'eager');
+      const eager = await timed(7);
+      assert.equal(eager.items?.length, 1);
+      assert.ok(eager.ms >= 110 && eager.ms < 520, `dentro de la línea, eager: ${eager.ms} ms`);
+      await setting('speculation', 'line');
+      // An empty line gets the short wait by default: one bet per new line.
+      const emptyLine = await timed(12);
+      assert.equal(emptyLine.items?.length, 1);
+      assert.ok(emptyLine.ms >= 110 && emptyLine.ms < 520, `línea vacía: ${emptyLine.ms} ms`);
+      // Right after accepting, no wait at all, even in the middle of a word.
+      await vscode.commands.executeCommand('ghostline._accepted', emptyLine.items[0].command.arguments[0]);
+      const afterAccept = await timed(8);
+      assert.equal(afterAccept.items?.length, 1);
+      assert.ok(afterAccept.ms < 450, `tras aceptar: ${afterAccept.ms} ms`);
+      // With speculation off nothing is anticipated: the original behaviour.
+      await setting('speculation', 'off');
+      const off = await timed(9);
+      assert.equal(off.items?.length, 1);
+      assert.ok(off.ms >= 580, `sin especulación: ${off.ms} ms`);
+    } finally {
+      await setting('speculation', undefined);
+      await setting('debounceMs', 0);
+    }
+  });
+
   // --- Fase 3 -----------------------------------------------------------------------------------
 
   await step('símbolos: la firma de una definición de otro archivo llega al prompt; de un archivo excluido, nunca', async () => {

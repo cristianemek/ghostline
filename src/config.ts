@@ -5,6 +5,11 @@ import { DEFAULT_EXCLUDE_PATTERNS } from './context/exclusions';
 export type TriggerMode = 'auto' | 'manual';
 export type PromptCacheMode = 'auto' | 'on' | 'off';
 export type ReasoningMode = 'minimal' | 'adaptive';
+/**
+ * How much ghostline bets on a suggestion being wanted before the user has clearly paused.
+ * off: never (fewest tokens). line: once per new line. eager: also at trigger points inside a line.
+ */
+export type Speculation = 'off' | 'line' | 'eager';
 
 export interface GhostlineConfig {
   enabled: boolean;
@@ -13,6 +18,9 @@ export interface GhostlineConfig {
   effort: string;
   triggerMode: TriggerMode;
   debounceMs: number;
+  /** Shorter wait used at trigger points (new line, after ".", "(", "="…). */
+  eagerDebounceMs: number;
+  speculation: Speculation;
   maxLines: number;
   requestTimeoutMs: number;
   dailyRequestLimit: number;
@@ -76,6 +84,7 @@ export function readConfig(): GhostlineConfig {
 
   const model = String(user('model') ?? '').trim();
   const debounceMs = number(user('debounceMs'), 350);
+  const eagerDebounceMs = number(user('eagerDebounceMs'), 120);
   const maxLines = Math.floor(number(user('maxLines'), 6, 1));
   const prefixLines = Math.floor(number(user('context.prefixLines'), 60, 1));
   const suffixLines = Math.floor(number(user('context.suffixLines'), 20));
@@ -92,6 +101,7 @@ export function readConfig(): GhostlineConfig {
         ? 'manual'
         : 'auto',
     debounceMs: Math.max(debounceMs, ...workspace('debounceMs').map((value) => number(value, debounceMs))),
+    eagerDebounceMs: Math.max(eagerDebounceMs, ...workspace('eagerDebounceMs').map((value) => number(value, eagerDebounceMs))),
     maxLines: Math.min(maxLines, ...workspace('maxLines').map((value) => Math.floor(number(value, maxLines, 1)))),
     requestTimeoutMs: number(user('requestTimeoutMs'), 8000, 1000),
     dailyRequestLimit: Math.floor(number(user('dailyRequestLimit'), 1500)),
@@ -112,6 +122,7 @@ export function readConfig(): GhostlineConfig {
     recycleEvery: Math.floor(number(user('recycleEvery'), 8, 1)),
     promptCache: oneOf(user('promptCache'), ['auto', 'on', 'off'] as const, 'auto'),
     reasoning: oneOf(user('reasoning'), ['minimal', 'adaptive'] as const, 'minimal'),
+    speculation: oneOf(user('speculation'), ['off', 'line', 'eager'] as const, 'line'),
     prefixLines: Math.min(prefixLines, ...workspace('context.prefixLines').map((value) => Math.floor(number(value, prefixLines, 1)))),
     suffixLines: Math.min(suffixLines, ...workspace('context.suffixLines').map((value) => Math.floor(number(value, suffixLines)))),
     symbolContext: user('context.symbols') === true,
