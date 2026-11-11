@@ -9,10 +9,12 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 - Verificación de la CLI y medidas iniciales: [`docs/paso-0.md`](docs/paso-0.md)
 - Cifras y decisiones de cada fase: [`docs/fase-1.md`](docs/fase-1.md), [`docs/fase-2.md`](docs/fase-2.md),
   [`docs/fase-3.md`](docs/fase-3.md)
+- Auditoría de seguridad y robustez: [`docs/auditoria.md`](docs/auditoria.md)
+- Cuánto acierta y cómo se mide: [`docs/acierto.md`](docs/acierto.md)
 
 ## Requisitos
 
-- VS Code 1.98 o posterior.
+- VS Code 1.144 o posterior.
 - Claude Code instalado e iniciado con tu suscripción (`claude` → `/login`).
 - En Windows hace falta un `claude.exe`: el del instalador nativo o el que trae el paquete de npm
   (ghostline resuelve solo el `claude.cmd` de npm a su `.exe`). Nunca se lanza nada a través de un shell.
@@ -22,7 +24,7 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.3.0.vsix
+code --install-extension ghostline-0.4.0.vsix
 ```
 
 ## Uso
@@ -99,7 +101,12 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
   definidos en otros archivos; con ella el modelo deja de inventarse los argumentos de una llamada).
 - **Archivos excluidos**: nunca se sugiere en ellos (tampoco en manual), nunca se envían y nunca se guarda nada de ellos.
   Por defecto: `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `*secret*`,
-  `*credential*`, `.npmrc`, `.pypirc`, `.netrc`, `.aws/**`, `.ssh/**`, `*.kdbx`.
+  `*credential*` (archivos y carpetas), `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `.aws/**`, `.ssh/**`,
+  `.gnupg/**`, `.kube/**`, `.docker/config.json`, `*.tfvars`, `*.tfstate*`, `*.jks`, `*.keystore`, `.htpasswd`, `*.kdbx`.
+- **Un repositorio no puede aflojar tu configuración.** Los ajustes que deciden qué se ejecuta, se envía o se
+  gasta (modelo, límite diario, símbolos, log de prompts…) solo se leen de tus ajustes de usuario. Lo que sí
+  admite valor por área de trabajo se combina quedándose con lo más restrictivo: las exclusiones y los
+  lenguajes desactivados se suman, puede desactivar ghostline o pedir el modo manual, pero no al revés.
 - Solo en áreas de trabajo de confianza. Sin conexiones de red propias y sin telemetría: el único proceso externo es la CLI.
 - Si la CLI se autentica con una API key (`apiKeySource` distinto de `none`), ghostline avisa: se estaría
   facturando la API en vez de la suscripción.
