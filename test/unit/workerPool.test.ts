@@ -1,6 +1,7 @@
 // Integration tests: the real WorkerPool/CliWorker against test/fake-claude.js. No tokens are spent.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test, type TestContext } from 'node:test';
@@ -9,12 +10,14 @@ import { WorkerPool, type PoolConfig } from '../../src/cli/workerPool';
 
 const FAKE_CLI = join(process.cwd(), 'test', 'fake-claude.js');
 const scratch = mkdtempSync(join(tmpdir(), 'ghostline-test-'));
-after(() => {
-  // Best effort: on Windows a just-killed child can keep its cwd locked for a moment.
+after(async () => {
+  // Retired workers exit once their stdin is closed, which needs the event loop: a synchronous
+  // retry loop here would keep them alive, and on Windows a live child locks its cwd.
+  await new Promise((resolve) => setTimeout(resolve, 300));
   try {
-    rmSync(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
-  } catch {
-    // Leftovers in the OS temp folder are harmless.
+    await rm(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  } catch (error) {
+    console.error(`could not remove ${scratch}: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
 
