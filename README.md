@@ -1,3 +1,5 @@
+<p align="center"><img src="resources/icon.svg" width="112" alt="Icono de ghostline: un fantasma sobre una línea de código"></p>
+
 # ghostline
 
 Autocompletado inline para VS Code (texto fantasma, `Tab` para aceptar) generado por Claude a través de la
@@ -24,11 +26,31 @@ latencia después (la spec original ponía la latencia por delante de la calidad
 
 ## Instalación
 
+Con Node 20 o posterior:
+
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.7.0.vsix
+code --install-extension ghostline-0.8.0.vsix
 ```
+
+### En otro equipo (Ubuntu u otro Linux)
+
+El repositorio es privado y no hay nada publicado, así que el `.vsix` se copia o se genera allí.
+
+1. Claude Code con tu suscripción: `npm install -g @anthropic-ai/claude-code`, luego `claude` y `/login`.
+2. La extensión, de una de estas dos formas:
+   - copia `ghostline-0.8.0.vsix` (unos 50 KB) al otro equipo; o
+   - genérala allí: `git clone https://github.com/cristianemek/ghostline.git`, y dentro `npm install` y
+     `npm run package`.
+3. `code --install-extension ghostline-0.8.0.vsix` y recarga la ventana.
+
+Si la barra de estado dice «sin CLI», VS Code no ha heredado el `PATH` de tu terminal: pon en
+`ghostline.cliPath` lo que devuelva `which claude`. Ese ajuste es por equipo y no se sincroniza. Lo aprendido
+(ejemplos, perfil de estilo) y los contadores también son de cada equipo.
+
+El código que busca y lanza la CLI en Linux tiene tests, pero hasta ahora ghostline solo se ha ejecutado en
+Windows.
 
 ## Uso
 
@@ -41,8 +63,11 @@ code --install-extension ghostline-0.7.0.vsix
   (`editor.action.inlineSuggest.trigger`). VS Code 1.144 ya no trae atajo por defecto para ese comando, así que
   ghostline le asigna `Alt+\` (la tecla física `\` del teclado US; en teclado español es `Alt+ç`). Se cambia en
   *Métodos abreviados de teclado*.
-- **Barra de estado**: `ghostline 123 · 180k tok · 34% ✓` = peticiones de hoy · tokens de hoy · sugerencias aceptadas.
-  El tooltip desglosa tokens, latencia p50/p95, modelo, `apiKeySource` y el uso de los límites de la suscripción.
+- **Barra de estado**: `ghostline 8% · Claude 59%`. El primero es cuánto llevas hoy de tu propio tope diario
+  (`ghostline.dailyRequestLimit`); el segundo, cómo de llena está la sesión de Claude (la ventana de 5 horas de
+  la suscripción) según la última petición. El tooltip añade solo las cifras detrás de esos dos porcentajes, la
+  semana y las sugerencias aceptadas. Tokens, latencia y coste están a un clic, en *Consumo de los últimos 7
+  días* y en el log. (La spec pedía `peticiones · tokens · % aceptadas`; se cambió en la v0.8.0.)
   Al hacer clic: pausar, cambiar de modo, abrir el log, ver los últimos 7 días, reiniciar contadores.
 - **Log**: canal de salida *ghostline*, una línea por petición (espera, primer token, total, tokens, resultado).
   Los prompts no se registran salvo con `ghostline.debug.logPrompts`.

@@ -2,7 +2,8 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.7.0",
+  "version": "0.8.0",
+  "icon": "resources/icon.png",
   "private": true,
   "publisher": "cristianemek",
   "license": "UNLICENSED",
@@ -333,7 +334,7 @@
     "bench:typing": "node esbuild.mjs && node test/e2e/run.js --typing",
     "check": "npm run typecheck && npm run lint && npm test",
     "vscode:prepublish": "npm run build:prod",
-    "package": "vsce package --no-dependencies --skip-license",
+    "package": "vsce package --no-dependencies --skip-license --no-rewrite-relative-links",
     "audit": "npm audit --audit-level=low"
   },
   "devDependencies": {

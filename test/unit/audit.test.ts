@@ -50,15 +50,13 @@ test('breaker: one success closes it and resets the count', () => {
 test('status bar and tooltip say when automatic suggestions are paused by errors', () => {
   const session: SessionInfo = {
     triggerMode: 'auto',
-    workerMode: 'single-use',
     paused: false,
     limitReached: false,
     dailyLimit: 1500,
-    model: 'haiku',
     trouble: { remainingMs: 41_500, reason: 'Invalid API key · Please run /login' },
   };
   assert.match(statusText(emptyDay('2026-11-11'), session), /^\$\(warning\) ghostline /);
-  const tooltip = tooltipLines(emptyDay('2026-11-11'), {}, undefined, session).join('\n');
+  const tooltip = tooltipLines(emptyDay('2026-11-11'), session).join('\n');
   assert.match(tooltip, /en pausa 42 s por errores repetidos de la CLI: Invalid API key/);
   assert.match(tooltip, /invocación manual sigue disponible/);
 });

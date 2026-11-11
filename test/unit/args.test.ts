@@ -66,12 +66,18 @@ test('input line: one JSON object per line, whatever the prompt contains', () =>
 
 const session: SessionInfo = {
   triggerMode: 'auto',
-  workerMode: 'single-use',
   paused: false,
   limitReached: false,
   dailyLimit: 1500,
-  model: 'claude-haiku-5-5',
   apiKeySource: 'none',
+};
+
+const rateLimit: NonNullable<SessionInfo['rateLimit']> = {
+  status: 'allowed',
+  windows: {
+    five_hour: { utilization: 0.59, resetsAt: 0, status: 'allowed' },
+    seven_day: { utilization: 0.93, resetsAt: 0, status: 'allowed_warning' },
+  },
 };
 
 function busyDay() {
@@ -87,37 +93,36 @@ function busyDay() {
   };
 }
 
-test('status bar text follows the spec format', () => {
-  assert.equal(statusText(busyDay(), session), 'ghostline 123 · 180k tok · 34% ✓');
-  assert.equal(statusText(emptyDay('2026-11-11'), session), 'ghostline 0 · 0 tok · – ✓');
-  assert.match(statusText(busyDay(), { ...session, paused: true }), /^\$\(debug-pause\) ghostline 123/);
-  assert.match(statusText(busyDay(), { ...session, triggerMode: 'manual' }), /^ghostline \(manual\) 123/);
+test('status bar text: share of ghostline’s own daily cap · how full Claude’s session is', () => {
+  assert.equal(statusText(busyDay(), { ...session, rateLimit }), 'ghostline 8% · Claude 59%');
+  // Nothing known about the session until the first request of the window.
+  assert.equal(statusText(busyDay(), session), 'ghostline 8% · Claude –');
+  assert.equal(statusText(emptyDay('2026-11-11'), session), 'ghostline 0% · Claude –');
+  // Something used never reads as 0%.
+  assert.equal(statusText({ ...emptyDay('2026-11-11'), requests: 11 }, session), 'ghostline <1% · Claude –');
+  // Without a daily cap there is no share to show: the count.
+  assert.equal(statusText(busyDay(), { ...session, dailyLimit: 0 }), 'ghostline 123 · Claude –');
+  assert.match(statusText(busyDay(), { ...session, paused: true }), /^\$\(debug-pause\) ghostline 8%/);
+  assert.match(statusText(busyDay(), { ...session, triggerMode: 'manual' }), /^ghostline \(manual\) 8%/);
   assert.match(statusText(busyDay(), { ...session, limitReached: true }), /^\$\(circle-slash\)/);
   assert.match(statusText(busyDay(), { ...session, cliError: 'no claude' }), /sin CLI/);
 });
 
-test('tooltip: breakdown, latency, model, apiKeySource and warnings', () => {
-  const text = tooltipLines(busyDay(), { p50: 912.4, p95: 1480 }, 1890, {
-    ...session,
-    rateLimit: {
-      status: 'allowed',
-      windows: {
-        five_hour: { utilization: 0.07, resetsAt: 0, status: 'allowed' },
-        seven_day: { utilization: 0.86, resetsAt: 0, status: 'allowed_warning' },
-      },
-    },
-  }).join('\n');
-  assert.match(text, /entrada 170k · salida 4\.0k/);
-  assert.match(text, /34 aceptadas \(34%\)/);
-  assert.match(text, /p50 912 ms · p95 1480 ms/);
-  assert.match(text, /claude-haiku-5-5 · apiKeySource: none \(suscripción\)/);
-  assert.match(text, /5 h 7% · 7 días 86%/);
-  assert.match(text, /mediana\): 1\.9k tokens/);
-  assert.doesNotMatch(text, /API key/);
+test('tooltip: the two figures explained, acceptance, and warnings; nothing else', () => {
+  const lines = tooltipLines(busyDay(), { ...session, rateLimit });
+  assert.deepEqual(lines, [
+    '**ghostline** — modo auto',
+    'Tu tope diario: 8% (123 de 1500 peticiones)',
+    'Sesión de Claude (5 h): 59% · semana: 93%',
+    'Aceptadas: 34 de 100 (34%)',
+  ]);
+  assert.match(tooltipLines(busyDay(), session).join('\n'), /Sesión de Claude: sin datos hasta la primera petición/);
+  assert.match(tooltipLines(busyDay(), { ...session, dailyLimit: 0 }).join('\n'), /Hoy: 123 peticiones \(sin tope diario\)/);
+  assert.match(tooltipLines(busyDay(), { ...session, muted: ['go al final de línea'] }).join('\n'), /Silenciado 24 h: go al final de línea/);
 
-  const withKey = tooltipLines(busyDay(), {}, undefined, { ...session, apiKeySource: 'ANTHROPIC_API_KEY' }).join('\n');
+  const withKey = tooltipLines(busyDay(), { ...session, apiKeySource: 'ANTHROPIC_API_KEY' }).join('\n');
   assert.match(withKey, /usa una API key \(`ANTHROPIC_API_KEY`\)/);
-  const limited = tooltipLines(busyDay(), {}, undefined, { ...session, limitReached: true }).join('\n');
+  const limited = tooltipLines(busyDay(), { ...session, limitReached: true }).join('\n');
   assert.match(limited, /Límite diario alcanzado \(1500\)/);
 });
 

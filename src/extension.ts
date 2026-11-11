@@ -553,29 +553,20 @@ class Ghostline implements vscode.Disposable {
     const day = this.usage.today();
     const session: SessionInfo = {
       triggerMode: config.triggerMode,
-      workerMode: config.workerMode,
       paused: this.paused,
       limitReached: this.usage.overDailyLimit(config.dailyRequestLimit),
       dailyLimit: config.dailyRequestLimit,
-      model: this.init?.model || config.model,
       apiKeySource: this.init?.apiKeySource,
       cliError: this.cliError,
       rateLimit: this.rateLimit,
       trouble: this.provider.trouble,
-      learning: {
-        examples: this.examples.count(),
-        hasProfile: this.style.profile !== undefined,
-        muted: this.adaptive
-          .report()
-          .filter((entry) => entry.mutedUntil !== undefined)
-          .map((entry) => `${entry.languageId} ${CONTEXT_LABELS[entry.context]}`),
-      },
+      muted: this.adaptive
+        .report()
+        .filter((entry) => entry.mutedUntil !== undefined)
+        .map((entry) => `${entry.languageId} ${CONTEXT_LABELS[entry.context]}`),
     };
     this.statusBar.text = statusText(day, session);
-    const tooltip = new vscode.MarkdownString(
-      tooltipLines(day, this.usage.latency(day), this.usage.medianInputTokens(day), session).join('  \n'),
-      true,
-    );
+    const tooltip = new vscode.MarkdownString(tooltipLines(day, session).join('  \n'), true);
     this.statusBar.tooltip = tooltip;
     this.statusBar.backgroundColor = session.cliError
       ? new vscode.ThemeColor('statusBarItem.errorBackground')

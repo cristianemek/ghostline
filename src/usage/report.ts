@@ -8,29 +8,38 @@ export interface LatencyStats {
 
 export interface SessionInfo {
   triggerMode: string;
-  workerMode: string;
   paused: boolean;
   limitReached: boolean;
   dailyLimit: number;
-  /** Resolved model reported by the CLI, or the configured alias before the first request. */
-  model: string;
   /** `apiKeySource` from system/init; undefined until the first request. */
   apiKeySource?: string;
   cliError?: string;
   rateLimit?: RateLimitInfo;
   /** Automatic requests are paused after repeated failures. */
   trouble?: { remainingMs: number; reason: string };
-  learning?: {
-    /** Accepted completions stored for this workspace. */
-    examples: number;
-    hasProfile: boolean;
-    /** Language/context pairs muted by the adaptive trigger, already formatted. */
-    muted: string[];
-  };
+  /** Language/context pairs muted by the adaptive trigger, already formatted. */
+  muted?: string[];
 }
 
 function percent(rate: number | undefined): string {
   return rate === undefined ? '–' : `${Math.round(rate * 100)}%`;
+}
+
+/** A share of a limit: something used never reads as 0%. */
+function share(rate: number): string {
+  if (rate > 0 && rate < 0.01) return '<1%';
+  return `${Math.round(rate * 100)}%`;
+}
+
+/** Today's requests against ghostline's own daily cap; the bare count when there is no cap. */
+function dailyShare(day: DayStats, dailyLimit: number): string {
+  return dailyLimit > 0 ? share(day.requests / dailyLimit) : String(day.requests);
+}
+
+/** How full Claude's current session (the subscription's 5-hour window) is, as the CLI last reported it. */
+function sessionShare(rateLimit: RateLimitInfo | undefined): string {
+  const window = rateLimit?.windows.five_hour;
+  return window ? share(window.utilization) : '–';
 }
 
 function ms(value: number | undefined): string {
@@ -46,10 +55,14 @@ export function usesApiKey(apiKeySource: string | undefined): boolean {
   return apiKeySource !== undefined && apiKeySource !== '' && apiKeySource !== 'none';
 }
 
-/** `ghostline 123 · 180k tok · 34% ✓` */
+/**
+ * `ghostline 8% · Claude 59%`: how much of ghostline's own daily cap is used, and how full Claude's
+ * session is. (The spec asked for requests · tokens · acceptance; in use, these two were the ones
+ * worth a glance. The rest is one click away, in the last-7-days list and the log.)
+ */
 export function statusText(day: DayStats, session: SessionInfo): string {
   if (session.cliError) return '$(warning) ghostline: sin CLI';
-  const counters = `${day.requests} · ${formatTokens(totalTokens(day))} tok · ${percent(acceptanceRate(day))} ✓`;
+  const counters = `${dailyShare(day, session.dailyLimit)} · Claude ${sessionShare(session.rateLimit)}`;
   if (session.paused) return `$(debug-pause) ghostline ${counters}`;
   if (session.trouble) return `$(warning) ghostline ${counters}`;
   if (session.limitReached) return `$(circle-slash) ghostline ${counters}`;
@@ -57,25 +70,14 @@ export function statusText(day: DayStats, session: SessionInfo): string {
   return `ghostline ${counters}`;
 }
 
-const WINDOW_LABELS: Record<string, string> = {
-  five_hour: '5 h',
-  seven_day: '7 días',
-  seven_day_opus: '7 días (Opus)',
-  seven_day_sonnet: '7 días (Sonnet)',
-};
-
-function rateLimitLine(info: RateLimitInfo): string | undefined {
-  const parts = Object.entries(info.windows).map(
-    ([name, window]) => `${WINDOW_LABELS[name] ?? name} ${Math.round(window.utilization * 100)}%`,
-  );
-  return parts.length > 0 ? `Límites de la suscripción: ${parts.join(' · ')}` : undefined;
-}
-
-/** Tooltip of the status bar item, one markdown line per entry. */
-export function tooltipLines(day: DayStats, latency: LatencyStats, medianInput: number | undefined, session: SessionInfo): string[] {
+/**
+ * Tooltip of the status bar item, one markdown line per entry: what the two figures mean, how the
+ * suggestions are doing, and whatever needs attention. Nothing else.
+ */
+export function tooltipLines(day: DayStats, session: SessionInfo): string[] {
   const lines: string[] = [];
   const state = session.paused ? 'en pausa' : session.triggerMode === 'manual' ? 'modo manual' : 'modo auto';
-  lines.push(`**ghostline** — ${state} · procesos ${session.workerMode}`);
+  lines.push(`**ghostline** — ${state}`);
   if (session.cliError) lines.push(`$(warning) ${session.cliError}`);
   if (usesApiKey(session.apiKeySource)) {
     lines.push(`$(warning) La CLI usa una API key (\`${session.apiKeySource}\`): se factura la API, no la suscripción.`);
@@ -90,40 +92,18 @@ export function tooltipLines(day: DayStats, latency: LatencyStats, medianInput: 
     lines.push(`$(circle-slash) Límite diario alcanzado (${session.dailyLimit}): el modo auto está en pausa, el manual sigue funcionando.`);
   }
   lines.push(
-    `Hoy: ${day.requests} peticiones` +
-      (session.dailyLimit > 0 ? ` de ${session.dailyLimit}` : '') +
-      ` · ${day.cancelled} canceladas · ${day.errors + day.timeouts} fallidas · ${day.localHits} servidas en local`,
+    session.dailyLimit > 0
+      ? `Tu tope diario: ${dailyShare(day, session.dailyLimit)} (${day.requests} de ${session.dailyLimit} peticiones)`
+      : `Hoy: ${day.requests} peticiones (sin tope diario)`,
   );
+  const week = session.rateLimit?.windows.seven_day;
   lines.push(
-    `Tokens: entrada ${formatTokens(day.inputTokens)} · salida ${formatTokens(day.outputTokens)} · ` +
-      `razonamiento ${formatTokens(day.thinkingTokens)} · caché ${formatTokens(day.cacheReadTokens)} leídos / ` +
-      `${formatTokens(day.cacheWriteTokens)} escritos`,
+    session.rateLimit?.windows.five_hour
+      ? `Sesión de Claude (5 h): ${sessionShare(session.rateLimit)}` + (week ? ` · semana: ${share(week.utilization)}` : '')
+      : 'Sesión de Claude: sin datos hasta la primera petición',
   );
-  if (day.unconfirmedTokens > 0) {
-    lines.push(
-      `Sin confirmar: ~${formatTokens(day.unconfirmedTokens)} tokens de peticiones cortadas antes de que el modelo respondiera ` +
-        '(la CLI no informa de si se cobran)',
-    );
-  }
-  lines.push(`Entrada por petición (mediana): ${medianInput === undefined ? '–' : formatTokens(medianInput)} tokens`);
-  lines.push(`Sugerencias: ${day.shown} mostradas · ${day.accepted} aceptadas (${percent(acceptanceRate(day))})`);
-  lines.push(`Latencia: p50 ${ms(latency.p50)} · p95 ${ms(latency.p95)}`);
-  lines.push(
-    `Modelo: ${session.model} · apiKeySource: ${session.apiKeySource ?? 'aún sin datos'}` +
-      (session.apiKeySource === 'none' ? ' (suscripción)' : ''),
-  );
-  if (session.rateLimit) {
-    const line = rateLimitLine(session.rateLimit);
-    if (line) lines.push(line);
-  }
-  if (session.learning) {
-    const { examples, hasProfile, muted } = session.learning;
-    lines.push(
-      `Aprendizaje: ${examples} ejemplos aceptados · perfil de estilo: ${hasProfile ? 'sí' : 'no'}` +
-        (muted.length > 0 ? ` · silenciado 24 h: ${muted.join(', ')}` : ''),
-    );
-  }
-  if (day.costUsd > 0) lines.push(`Coste equivalente en la API: ${usd(day.costUsd)}`);
+  lines.push(`Aceptadas: ${day.accepted} de ${day.shown} (${percent(acceptanceRate(day))})`);
+  if (session.muted && session.muted.length > 0) lines.push(`Silenciado 24 h: ${session.muted.join(', ')}`);
   return lines;
 }
 

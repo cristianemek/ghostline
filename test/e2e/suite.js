@@ -183,8 +183,9 @@ async function run() {
     await setting('triggerMode', 'auto');
   });
 
-  await step('barra de estado: peticiones · tokens · % de aceptadas', async () => {
-    assert.match(api.statusText(), /^ghostline 5 · [\d.]+k? tok · \d+% ✓$/);
+  await step('barra de estado: % del tope diario propio · % de la sesión de Claude', async () => {
+    // 5 requests out of 1.500, and whatever the (fake) CLI last reported for the 5-hour window.
+    assert.match(api.statusText(), /^ghostline <1% · Claude (\d+%|<1%|–)$/);
   });
 
   await step('límite diario: pausa el modo auto, lo indica y el manual sigue funcionando', async () => {
