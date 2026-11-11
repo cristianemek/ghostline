@@ -18,6 +18,8 @@ export interface SessionInfo {
   apiKeySource?: string;
   cliError?: string;
   rateLimit?: RateLimitInfo;
+  /** Automatic requests are paused after repeated failures. */
+  trouble?: { remainingMs: number; reason: string };
   learning?: {
     /** Accepted completions stored for this workspace. */
     examples: number;
@@ -49,6 +51,7 @@ export function statusText(day: DayStats, session: SessionInfo): string {
   if (session.cliError) return '$(warning) ghostline: sin CLI';
   const counters = `${day.requests} · ${formatTokens(totalTokens(day))} tok · ${percent(acceptanceRate(day))} ✓`;
   if (session.paused) return `$(debug-pause) ghostline ${counters}`;
+  if (session.trouble) return `$(warning) ghostline ${counters}`;
   if (session.limitReached) return `$(circle-slash) ghostline ${counters}`;
   if (session.triggerMode === 'manual') return `ghostline (manual) ${counters}`;
   return `ghostline ${counters}`;
@@ -76,6 +79,12 @@ export function tooltipLines(day: DayStats, latency: LatencyStats, medianInput: 
   if (session.cliError) lines.push(`$(warning) ${session.cliError}`);
   if (usesApiKey(session.apiKeySource)) {
     lines.push(`$(warning) La CLI usa una API key (\`${session.apiKeySource}\`): se factura la API, no la suscripción.`);
+  }
+  if (session.trouble) {
+    lines.push(
+      `$(warning) Sugerencias automáticas en pausa ${Math.ceil(session.trouble.remainingMs / 1000)} s por errores repetidos de la CLI: ` +
+        `${session.trouble.reason.slice(0, 160)}. La invocación manual sigue disponible.`,
+    );
   }
   if (session.limitReached) {
     lines.push(`$(circle-slash) Límite diario alcanzado (${session.dailyLimit}): el modo auto está en pausa, el manual sigue funcionando.`);

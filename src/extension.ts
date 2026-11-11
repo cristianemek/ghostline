@@ -15,9 +15,9 @@ import {
   updateSetting,
   type GhostlineConfig,
 } from './config';
-import { isPathExcluded } from './context/exclusions';
+import { isPathExcluded, unusablePatterns } from './context/exclusions';
 import { createSymbolProvider } from './context/symbols';
-import { AdaptiveTrigger } from './learning/adaptiveTrigger';
+import { AdaptiveTrigger, type ContextReport } from './learning/adaptiveTrigger';
 import { ExampleStore } from './learning/exampleStore';
 import { CONTEXT_LABELS, Learning } from './learning/learning';
 import { StyleManager, type Launcher } from './learning/styleManager';
@@ -41,6 +41,8 @@ export interface GhostlineTestApi {
   statusText(): string;
   logLines(): string[];
   exampleCount(): number;
+  adaptiveReport(): ContextReport[];
+  config(): GhostlineConfig;
   styleProfile(): string | undefined;
   learnStyleFrom(paths: string[]): Promise<string>;
 }
@@ -57,6 +59,7 @@ class Ghostline implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private readonly excludedCache = new Map<string, boolean>();
   private readonly warnedKeySources = new Set<string>();
+  private readonly shownTroubles = new Set<string>();
   private readonly cwd: string;
   private readonly flushTimer: NodeJS.Timeout;
   private config: GhostlineConfig = readConfig();
@@ -110,6 +113,7 @@ class Ghostline implements vscode.Disposable {
       estimator: this.estimator,
       log: (line) => this.log(line),
       onActivity: () => this.queueRender(),
+      onTrouble: (message, pauseMs) => this.onTrouble(message, pauseMs),
       learning,
       // Phase 3, off unless "ghostline.context.symbols" is on.
       symbols: createSymbolProvider({
@@ -197,6 +201,11 @@ class Ghostline implements vscode.Disposable {
     }
     this.cliError = undefined;
     const { config } = this;
+    // Say it before the first request is billed, not after: with one of these variables set the CLI
+    // authenticates against the API instead of the subscription.
+    for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) {
+      if (process.env[name]) this.warnAboutApiKey(name);
+    }
     this.log(
       `CLI: ${resolved.command} (${resolved.source}) · modelo ${config.model} · effort ${config.effort} · ` +
         `procesos ${config.workerMode} · razonamiento ${config.reasoning} · ` +
@@ -268,6 +277,8 @@ class Ghostline implements vscode.Disposable {
       },
       logLines: () => [...this.logLines],
       exampleCount: () => this.examples.count(),
+      adaptiveReport: () => this.adaptive.report(),
+      config: () => this.config,
       styleProfile: () => this.style.profile,
       learnStyleFrom: (paths) => this.style.learnFrom(paths.map((file) => vscode.Uri.file(file))),
     };
@@ -297,21 +308,24 @@ class Ghostline implements vscode.Disposable {
           `(tools: ${info.tools.length}, mcp_servers: ${info.mcpServers.length}); deberían ser listas vacías.`,
       );
     }
-    if (usesApiKey(info.apiKeySource) && !this.warnedKeySources.has(info.apiKeySource)) {
-      this.warnedKeySources.add(info.apiKeySource);
-      this.log(`AVISO: la CLI se autentica con ${info.apiKeySource}, no con la suscripción.`);
-      void vscode.window
-        .showWarningMessage(
-          `ghostline: la CLI de Claude Code está usando una API key (${info.apiKeySource}). ` +
-            'Cada sugerencia se factura en la API en lugar de ir contra tu suscripción.',
-          'Pausar ghostline',
-          'Entendido',
-        )
-        .then((choice) => {
-          if (choice === 'Pausar ghostline' && !this.paused) this.togglePause();
-        });
-    }
+    if (usesApiKey(info.apiKeySource)) this.warnAboutApiKey(info.apiKeySource);
     this.queueRender();
+  }
+
+  private warnAboutApiKey(source: string): void {
+    if (this.warnedKeySources.has(source)) return;
+    this.warnedKeySources.add(source);
+    this.log(`AVISO: la CLI se autentica con ${source}, no con la suscripción.`);
+    void vscode.window
+      .showWarningMessage(
+        `ghostline: la CLI de Claude Code está usando una API key (${source}). ` +
+          'Cada sugerencia se factura en la API en lugar de ir contra tu suscripción.',
+        'Pausar ghostline',
+        'Entendido',
+      )
+      .then((choice) => {
+        if (choice === 'Pausar ghostline' && !this.paused) this.togglePause();
+      });
   }
 
   // --- Events --------------------------------------------------------------------------------
@@ -320,11 +334,43 @@ class Ghostline implements vscode.Disposable {
     if (!affectsGhostline(event)) return;
     this.config = readConfig();
     this.excludedCache.clear();
-    if (affectsPool(event)) {
-      this.resetPool();
-      this.provider.clearCache();
+    // Cached suggestions were produced under the old settings (line limit, exclusions, model…).
+    this.provider.clearCache();
+    if (affectsPool(event) || !this.config.enabled) this.resetPool();
+    this.warnAboutPatterns();
+    this.queueRender();
+  }
+
+  /** An exclusion pattern that cannot be evaluated protects nothing: say so instead of ignoring it. */
+  private warnAboutPatterns(): void {
+    const unusable = unusablePatterns(this.config.excludePatterns);
+    if (unusable.length === 0) return;
+    this.log(`AVISO: patrones de exclusión demasiado complejos, no se aplican: ${unusable.join(' · ')}`);
+    void vscode.window.showWarningMessage(
+      `ghostline: ${unusable.length} patrón(es) de "ghostline.excludePatterns" son demasiado complejos y no se aplican. ` +
+        'Simplifícalos (menos de 200 caracteres y de 64 alternativas entre llaves).',
+    );
+  }
+
+  /** Automatic requests were paused after repeated failures: explain why, once per reason. */
+  private onTrouble(message: string, pauseMs: number): void {
+    const seconds = Math.round(pauseMs / 1000);
+    this.log(`sugerencias automáticas en pausa ${seconds} s tras errores repetidos: ${message}`);
+    if (!this.shownTroubles.has(message)) {
+      this.shownTroubles.add(message);
+      void vscode.window
+        .showWarningMessage(
+          `ghostline: la CLI de Claude Code está fallando (${message.slice(0, 200)}). ` +
+            'Las sugerencias automáticas se reanudan solas cuando vuelva a responder; la invocación manual sigue disponible.',
+          'Abrir el log',
+        )
+        .then((choice) => {
+          if (choice) this.channel.show(true);
+        });
     }
     this.queueRender();
+    // Refresh the status bar when the pause is over.
+    setTimeout(() => this.queueRender(), pauseMs + 200).unref();
   }
 
   private onDocumentChange(event: vscode.TextDocumentChangeEvent): void {
@@ -504,6 +550,7 @@ class Ghostline implements vscode.Disposable {
       apiKeySource: this.init?.apiKeySource,
       cliError: this.cliError,
       rateLimit: this.rateLimit,
+      trouble: this.provider.trouble,
       learning: {
         examples: this.examples.count(),
         hasProfile: this.style.profile !== undefined,
@@ -521,7 +568,7 @@ class Ghostline implements vscode.Disposable {
     this.statusBar.tooltip = tooltip;
     this.statusBar.backgroundColor = session.cliError
       ? new vscode.ThemeColor('statusBarItem.errorBackground')
-      : usesApiKey(session.apiKeySource) || session.limitReached
+      : usesApiKey(session.apiKeySource) || session.limitReached || session.trouble
         ? new vscode.ThemeColor('statusBarItem.warningBackground')
         : undefined;
   }

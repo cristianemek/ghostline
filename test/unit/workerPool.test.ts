@@ -1,6 +1,6 @@
 // Integration tests: the real WorkerPool/CliWorker against test/fake-claude.js. No tokens are spent.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -288,6 +288,18 @@ test('an idle standby is retired and replaced on demand', async (t) => {
   assert.equal(pool.spawnCount, 2);
   const outcome = await pool.request('x');
   assert.equal(outcome.status, 'ok');
+});
+
+test('a working folder that was cleaned up behind our back is recreated', async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ghostline-test-gone-'));
+  rmdirSync(cwd);
+  const { pool } = createPool(t, {}, { cwd });
+  const outcome = await pool.request('x');
+  assert.equal(outcome.status, 'ok');
+  t.after(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await rm(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }).catch(() => undefined);
+  });
 });
 
 test('dispose: later requests are cancelled without spawning', async (t) => {

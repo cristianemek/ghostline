@@ -16,6 +16,7 @@ export interface PostprocessInput {
   languageId?: string;
 }
 
+/** Languages where a full sentence is ordinary content: prose, markup templates and data files. */
 const PROSE_LANGUAGES = new Set([
   'markdown',
   'mdx',
@@ -27,6 +28,19 @@ const PROSE_LANGUAGES = new Set([
   'git-commit',
   'scminput',
   'html',
+  'xml',
+  'handlebars',
+  'jinja',
+  'django-html',
+  'erb',
+  'razor',
+  'yaml',
+  'json',
+  'jsonc',
+  'toml',
+  'ini',
+  'properties',
+  'csv',
 ]);
 
 const WORD_CHAR = /[A-Za-z0-9_$]/;
@@ -138,6 +152,9 @@ function insideCommentBlock(prefix: string): boolean {
 function cutAtProse(text: string, prefix: string, lineContent: string, languageId: string | undefined): string {
   if (languageId && PROSE_LANGUAGES.has(languageId)) return text;
   if (insideCommentBlock(prefix)) return text;
+  // Right after a tag (JSX, Vue, Svelte, PHP templates…) the text content of the element is what
+  // comes next. "=>" and "->" end in the same character but are not tags.
+  if (/(?<![=-])>\s*$/.test(prefix)) return text;
   const lines = text.split('\n');
   const inCommentOrString = COMMENT_START.test(lineContent) || (lineContent.match(/["'`]/g)?.length ?? 0) % 2 === 1;
   const start = inCommentOrString ? 1 : 0;

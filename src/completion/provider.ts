@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import * as vscode from 'vscode';
 import { totalInputTokens } from '../cli/streamParser';
 import type { CompletionOutcome, WorkerPool } from '../cli/workerPool';
@@ -6,6 +7,7 @@ import type { TokenEstimator } from '../usage/tokenEstimator';
 import { summaryLine } from '../usage/report';
 import { formatRequestLine, type RequestLogEntry } from '../usage/requestLog';
 import type { UsageTracker } from '../usage/usageTracker';
+import { FailureBreaker } from './breaker';
 import { LruCache, Typeahead, completionKey, type DocumentReader } from './cache';
 import type { LearningHooks, SuggestionInfo } from './hooks';
 import { postprocess, shouldStopEarly, trimAgainstSuffix, type IndentStyle } from './postprocess';
@@ -44,11 +46,15 @@ export interface ProviderDeps {
   log(line: string): void;
   /** Something the status bar shows has changed. */
   onActivity(): void;
+  /** Automatic requests have just been paused for `pauseMs` after repeated failures. */
+  onTrouble?(message: string, pauseMs: number): void;
   learning?: LearningHooks;
   symbols?: SymbolProvider;
 }
 
 interface LiveSuggestion extends SuggestionInfo {
+  /** When it reached the editor. */
+  shownAt: number;
   documentVersion: number;
   /** Cursor offset the last time it was served. */
   offset: number;
@@ -70,6 +76,14 @@ function indentStyleOf(document: vscode.TextDocument): IndentStyle {
   return { insertSpaces: settings.get<boolean>('insertSpaces', true), tabSize: settings.get<number>('tabSize', 4) };
 }
 
+/** The path shown to the model. Outside the workspace only the file name: the rest is the user's folder layout. */
+function promptPath(document: vscode.TextDocument): string {
+  if (document.isUntitled) return 'untitled';
+  return vscode.workspace.getWorkspaceFolder(document.uri)
+    ? vscode.workspace.asRelativePath(document.uri, false)
+    : basename(document.uri.fsPath);
+}
+
 function documentChars(document: vscode.TextDocument): number {
   return document.offsetAt(document.lineAt(document.lineCount - 1).range.end);
 }
@@ -82,10 +96,33 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
   private readonly cache = new LruCache<string>();
   private readonly typeahead = new Typeahead();
   private readonly typing = new TypingRate();
+  private readonly breaker = new FailureBreaker();
   private live: LiveSuggestion | null = null;
   private nextId = 1;
+  /** A suggestion dismissed sooner than this was never really seen. */
+  minVisibleMs = 750;
 
   constructor(private readonly deps: ProviderDeps) {}
+
+  /** Set while automatic requests are paused after repeated failures. */
+  get trouble(): { remainingMs: number; reason: string } | undefined {
+    return this.breaker.open ? { remainingMs: this.breaker.remainingMs, reason: this.breaker.reason ?? '' } : undefined;
+  }
+
+  async provideInlineCompletionItems(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    context: vscode.InlineCompletionContext,
+    token: vscode.CancellationToken,
+  ): Promise<vscode.InlineCompletionItem[] | undefined> {
+    try {
+      return await this.provide(document, position, context, token);
+    } catch (error) {
+      // A bug here must not surface as a noisy editor error on every keystroke.
+      this.deps.log(`ERROR interno: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+      return undefined;
+    }
+  }
 
   /** Call on every edit that looks like typing. */
   noteKeystroke(): void {
@@ -117,7 +154,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     this.typeahead.clear();
   }
 
-  async provideInlineCompletionItems(
+  private async provide(
     document: vscode.TextDocument,
     position: vscode.Position,
     context: vscode.InlineCompletionContext,
@@ -197,7 +234,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       return [this.show(document, position, read, describe(this.nextId++, cached), null)];
     }
 
-    if (!manual && deps.usage.overDailyLimit(config.dailyRequestLimit)) {
+    if (!manual && (deps.usage.overDailyLimit(config.dailyRequestLimit) || this.breaker.open)) {
       deps.onActivity();
       return undefined;
     }
@@ -205,18 +242,27 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     if (!pool) return undefined;
     pool.warm();
 
+    const versionAtStart = document.version;
     const controller = new AbortController();
     const subscription = token.onCancellationRequested(() => controller.abort());
     if (token.isCancellationRequested) controller.abort();
     try {
-      // 4. Debounce. The symbol lookup (Phase 3) runs meanwhile, so it adds no latency.
-      const symbolsPending =
-        config.symbolContext && deps.symbols
-          ? deps.symbols(document, position, controller.signal).catch(() => [])
-          : Promise.resolve<string[]>([]);
-      if (!manual) {
+      // 4. Debounce. The symbol lookup (Phase 3) shares the wait, so it adds no latency; it starts
+      // halfway through so that a burst of typing does not send a query per keystroke to the
+      // language server.
+      let symbolsPending: Promise<string[]> = Promise.resolve([]);
+      const lookUpSymbols = (): void => {
+        if (config.symbolContext && deps.symbols) {
+          symbolsPending = deps.symbols(document, position, controller.signal).catch(() => []);
+        }
+      };
+      if (manual) {
+        lookUpSymbols();
+      } else {
         const delay = debounceDelay(config.debounceMs, this.typing.isFast(Date.now()));
-        if (!(await wait(delay, controller.signal))) return undefined;
+        if (!(await wait(delay / 2, controller.signal))) return undefined;
+        lookUpSymbols();
+        if (!(await wait(delay / 2, controller.signal))) return undefined;
       }
       const symbols = await symbolsPending;
       if (controller.signal.aborted) return undefined;
@@ -225,7 +271,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       const { estimator } = deps;
       const extras = deps.learning?.promptExtras(languageId, before) ?? {};
       const built = buildPrompt({
-        path: document.isUntitled ? 'untitled' : vscode.workspace.asRelativePath(document.uri, false),
+        path: promptPath(document),
         languageId,
         prefix,
         suffix,
@@ -261,8 +307,14 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       if (outcome.status !== 'ok') {
         const detail = outcome.status === 'error' ? `error: ${outcome.errorMessage ?? 'desconocido'}` : outcome.status;
         deps.log(formatRequestLine(logEntry, detail === 'cancelled' ? 'cancelada' : detail));
+        if (outcome.status !== 'cancelled') {
+          const message = outcome.errorMessage ?? 'la CLI no respondió a tiempo';
+          const pauseMs = this.breaker.failure(message);
+          if (pauseMs > 0) deps.onTrouble?.(message, pauseMs);
+        }
         return undefined;
       }
+      this.breaker.success();
 
       // 7. Clean up the answer.
       const text = postprocess({
@@ -278,7 +330,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
         deps.log(formatRequestLine(logEntry, 'vacía'));
         return undefined;
       }
-      if (token.isCancellationRequested) {
+      if (token.isCancellationRequested || document.version !== versionAtStart) {
         // Too late for this keystroke, but it stays cached for the next time the cursor is here.
         deps.log(formatRequestLine(logEntry, 'llegó tarde (en caché)'));
         return undefined;
@@ -342,7 +394,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     logEntry: RequestLogEntry | null,
   ): vscode.InlineCompletionItem {
     const offset = document.offsetAt(position);
-    this.live = { ...suggestion, documentVersion: document.version, offset, logEntry };
+    this.live = { ...suggestion, documentVersion: document.version, offset, logEntry, shownAt: Date.now() };
     this.typeahead.remember(suggestion.documentKey, offset, read, suggestion.text, suggestion.id);
     this.deps.usage.recordShown();
     this.deps.learning?.onShown(suggestion);
@@ -364,13 +416,17 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     this.live = null;
     this.typeahead.clear();
     const { deps } = this;
+    let label: string = outcome;
     if (outcome === 'aceptada') {
       deps.usage.recordAccepted();
       deps.learning?.onAccepted(live);
     } else if (outcome === 'ignorada') {
-      deps.learning?.onIgnored(live);
+      // Gone before anyone could read it (the user simply kept typing): that says nothing about
+      // whether the suggestion was any good, so it must not count against this kind of context.
+      if (Date.now() - live.shownAt < this.minVisibleMs) label = 'descartada al instante';
+      else deps.learning?.onIgnored(live);
     }
-    if (live.logEntry) deps.log(formatRequestLine(live.logEntry, `${live.text.split('\n').length} líneas → ${outcome}`));
+    if (live.logEntry) deps.log(formatRequestLine(live.logEntry, `${live.text.split('\n').length} líneas → ${label}`));
     deps.onActivity();
   }
 }

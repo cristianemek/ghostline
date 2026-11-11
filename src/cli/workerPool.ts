@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import { buildCliArgs, buildCliEnv } from './args';
 import type { InitInfo, RateLimitInfo } from './streamParser';
 import { CliWorker, type TurnResult } from './worker';
@@ -180,6 +181,9 @@ export class WorkerPool {
       ...(config.extraArgs ?? []),
     ];
     try {
+      // The working folder lives in the OS temp directory, where anything may clean it up while the
+      // editor is open. Without it every launch fails with a misleading "ENOENT".
+      mkdirSync(config.cwd, { recursive: true });
       this.spawnCount++;
       return new CliWorker(
         {

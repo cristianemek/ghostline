@@ -24,6 +24,7 @@ const MIN_SAMPLES_FOR_OVERHEAD = 3;
 const MIN_SAMPLES_FOR_SLOPE = 8;
 const MIN_SAMPLES_FOR_OUTLIERS = 5;
 const OUTLIER_FACTOR = 1.5;
+const MAX_REJECTED_IN_A_ROW = 8;
 /** The slope is only trusted when prompt sizes actually varied (standard deviation in characters). */
 const MIN_SPREAD_CHARS = 300;
 const CHARS_PER_TOKEN_RANGE: readonly [number, number] = [1.5, 5];
@@ -41,6 +42,7 @@ function isState(value: unknown): value is CalibrationState {
 
 export class TokenEstimator {
   private state: CalibrationState;
+  private rejectedInARow = 0;
 
   constructor(saved?: unknown) {
     this.state = isState(saved) ? { ...saved } : { n: 0, sx: 0, sy: 0, sxx: 0, sxy: 0 };
@@ -52,16 +54,24 @@ export class TokenEstimator {
     const s = this.state;
     // A request far from what is expected (the CLI retried, a different model answered…) would tilt
     // the fit for a long time: skip it once there is a baseline to compare against.
+    let base = s;
     if (s.n >= MIN_SAMPLES_FOR_OUTLIERS) {
       const ratio = inputTokens / this.estimateTotal(promptChars);
-      if (ratio > OUTLIER_FACTOR || ratio < 1 / OUTLIER_FACTOR) return;
+      if (ratio > OUTLIER_FACTOR || ratio < 1 / OUTLIER_FACTOR) {
+        this.rejectedInARow++;
+        if (this.rejectedInARow < MAX_REJECTED_IN_A_ROW) return;
+        // Not outliers after all: something changed for good (another model, another tokenizer).
+        // Forget the old fit instead of rejecting the new reality forever.
+        base = { n: 0, sx: 0, sy: 0, sxx: 0, sxy: 0 };
+      }
     }
+    this.rejectedInARow = 0;
     this.state = {
-      n: s.n * DECAY + 1,
-      sx: s.sx * DECAY + promptChars,
-      sy: s.sy * DECAY + inputTokens,
-      sxx: s.sxx * DECAY + promptChars * promptChars,
-      sxy: s.sxy * DECAY + promptChars * inputTokens,
+      n: base.n * DECAY + 1,
+      sx: base.sx * DECAY + promptChars,
+      sy: base.sy * DECAY + inputTokens,
+      sxx: base.sxx * DECAY + promptChars * promptChars,
+      sxy: base.sxy * DECAY + promptChars * inputTokens,
     };
   }
 

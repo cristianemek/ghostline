@@ -87,6 +87,15 @@ test('sentences are kept where sentences belong', () => {
     postprocess({ raw: sentence, prefix: '# Notes\n\n', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'markdown' }),
     sentence,
   );
+  // Text content of an element, and values in data files.
+  assert.equal(run(sentence, 'return (\n  <p>\n    '), sentence);
+  assert.equal(run(sentence, '<template>\n  <h1>'), sentence);
+  assert.equal(
+    postprocess({ raw: sentence, prefix: 'description: ', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'yaml' }),
+    sentence,
+  );
+  // An arrow is not a tag: an explanation after it is still an explanation.
+  assert.equal(run(sentence, 'const run = () =>\n  '), '');
   // English-looking code is not prose.
   assert.equal(run('return a if b else c', '    '), 'return a if b else c');
   assert.equal(run('SELECT name FROM users WHERE active ORDER BY name', ''), 'SELECT name FROM users WHERE active ORDER BY name');
