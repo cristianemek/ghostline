@@ -1,0 +1,275 @@
+{
+  "name": "ghostline",
+  "displayName": "ghostline",
+  "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "cristianemek",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cristianemek/ghostline.git"
+  },
+  "engines": {
+    "vscode": "^1.98.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "ghostline lanza la CLI de Claude Code y envía fragmentos del archivo abierto; solo funciona en áreas de trabajo de confianza."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "ghostline necesita lanzar un proceso local (la CLI de Claude Code)."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "ghostline.showMenu",
+        "title": "Menú",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.togglePause",
+        "title": "Pausar o reanudar",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.toggleTriggerMode",
+        "title": "Cambiar entre modo auto y manual",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.openLog",
+        "title": "Abrir el log",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.showUsage",
+        "title": "Ver el consumo de los últimos 7 días",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.resetCounters",
+        "title": "Reiniciar contadores",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.learnProjectStyle",
+        "title": "Aprender estilo del proyecto",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.editProjectStyle",
+        "title": "Editar el perfil de estilo del proyecto",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.clearLearning",
+        "title": "Borrar lo aprendido en este proyecto",
+        "category": "ghostline"
+      }
+    ],
+    "configuration": {
+      "title": "ghostline",
+      "properties": {
+        "ghostline.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Activa o desactiva ghostline por completo."
+        },
+        "ghostline.cliPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Ruta al ejecutable de Claude Code. Vacío: se busca `claude` en `PATH`. En Windows debe ser un `.exe` (o el `claude.cmd` de npm, que se resuelve a su `.exe`); nunca se lanza con shell."
+        },
+        "ghostline.model": {
+          "type": "string",
+          "default": "haiku",
+          "description": "Modelo que se pasa a la CLI con --model."
+        },
+        "ghostline.effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "low",
+          "description": "Nivel de esfuerzo que se pasa a la CLI con --effort."
+        },
+        "ghostline.triggerMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "enumDescriptions": [
+            "Sugiere al dejar de teclear.",
+            "Solo sugiere al invocar «Desencadenar sugerencia insertada» (editor.action.inlineSuggest.trigger)."
+          ],
+          "default": "auto",
+          "description": "Cuándo se piden sugerencias."
+        },
+        "ghostline.debounceMs": {
+          "type": "number",
+          "default": 350,
+          "minimum": 0,
+          "description": "Espera, en milisegundos, tras dejar de teclear antes de pedir una sugerencia."
+        },
+        "ghostline.maxLines": {
+          "type": "number",
+          "default": 6,
+          "minimum": 1,
+          "description": "Número máximo de líneas de una sugerencia."
+        },
+        "ghostline.requestTimeoutMs": {
+          "type": "number",
+          "default": 8000,
+          "minimum": 1000,
+          "description": "Tiempo máximo por petición. Si se supera, se mata el proceso y no se sugiere nada."
+        },
+        "ghostline.dailyRequestLimit": {
+          "type": "number",
+          "default": 1500,
+          "minimum": 0,
+          "description": "Peticiones diarias a partir de las cuales se pausa el modo auto (el manual sigue funcionando). 0 = sin límite."
+        },
+        "ghostline.disabledLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "markdown",
+            "plaintext"
+          ],
+          "description": "Identificadores de lenguaje en los que no se sugiere automáticamente."
+        },
+        "ghostline.excludePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/.env",
+            "**/.env.*",
+            "**/*.pem",
+            "**/*.key",
+            "**/*.p12",
+            "**/*.pfx",
+            "**/id_rsa*",
+            "**/id_ed25519*",
+            "**/*secret*",
+            "**/*credential*",
+            "**/.npmrc",
+            "**/.pypirc",
+            "**/.netrc",
+            "**/.aws/**",
+            "**/.ssh/**",
+            "**/*.kdbx"
+          ],
+          "description": "Patrones glob de archivos sensibles: nunca se sugiere en ellos, nunca se envían como contexto y nunca se guarda feedback."
+        },
+        "ghostline.workerMode": {
+          "type": "string",
+          "enum": [
+            "single-use",
+            "persistent"
+          ],
+          "enumDescriptions": [
+            "Cada sugerencia usa un proceso nuevo ya precalentado: sin historial y con coste constante.",
+            "Un proceso de larga duración cuya conversación se recicla cada ghostline.recycleEvery peticiones."
+          ],
+          "default": "single-use",
+          "description": "Cómo se gestionan los procesos de la CLI."
+        },
+        "ghostline.recycleEvery": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "description": "En modo persistent, número de peticiones tras las que se recicla el proceso."
+        },
+        "ghostline.promptCache": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Desactivada en single-use (cada prompt es único y escribir en caché cuesta el doble) y activada en persistent.",
+            "Siempre activada (comportamiento por defecto de la CLI).",
+            "Siempre desactivada (DISABLE_PROMPT_CACHING=1)."
+          ],
+          "default": "auto",
+          "description": "Caché de prompts de la API en los procesos de la CLI."
+        },
+        "ghostline.context.prefixLines": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "description": "Líneas anteriores al cursor que se envían como máximo (además se recortan al presupuesto de tokens)."
+        },
+        "ghostline.context.suffixLines": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "description": "Líneas posteriores al cursor que se envían como máximo."
+        },
+        "ghostline.context.symbols": {
+          "type": "boolean",
+          "default": false,
+          "description": "Añade la firma de hasta 3 símbolos de la línea actual, resuelta con el servidor de lenguaje (suma hasta ~400 tokens por petición)."
+        },
+        "ghostline.learning.examples": {
+          "type": "boolean",
+          "default": true,
+          "description": "Guarda en local las sugerencias aceptadas y envía hasta 2 parecidas como ejemplo en cada petición."
+        },
+        "ghostline.learning.adaptiveTrigger": {
+          "type": "boolean",
+          "default": true,
+          "description": "Deja de disparar automáticamente durante 24 h en los contextos donde casi nunca aceptas sugerencias."
+        },
+        "ghostline.debug.logPrompts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Escribe en el log los prompts completos y las respuestas. Desactivado por defecto por privacidad."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "build:prod": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "node esbuild.mjs --tests && node --test \"out/test/**/*.test.js\"",
+    "bench": "node esbuild.mjs --scripts && node out/scripts/bench.js",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "vscode:prepublish": "npm run build:prod",
+    "package": "npx --yes @vscode/vsce package --no-dependencies --skip-license"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.98.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.14.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.2"
+  }
+}
