@@ -34,8 +34,25 @@ export interface CliEnvOptions {
   promptCache: boolean;
 }
 
+/**
+ * Variables a running Claude Code session hands to its children. If the editor was started from a
+ * Claude Code terminal they would make our processes behave as part of that session.
+ */
+const SESSION_VARIABLES = [
+  'CLAUDECODE',
+  'CLAUDE_PID',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_BRIDGE_SESSION_ID',
+  'CLAUDE_CODE_MESSAGING_SOCKET',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+];
+
 export function buildCliEnv(base: NodeJS.ProcessEnv, options: CliEnvOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
+  for (const name of SESSION_VARIABLES) delete env[name];
   // Short-lived background processes must not each try to self-update.
   env.DISABLE_AUTOUPDATER = '1';
   if (options.promptCache) {

@@ -66,11 +66,14 @@ interface Remembered {
 }
 
 export interface TypeaheadMatch {
-  /** What is left of the suggestion after what the user has typed. */
+  /** What is left of the suggestion after what the user has typed; empty once it is all there. */
   rest: string;
   typed: string;
   id: number;
 }
+
+/** Returns the document text between two offsets, with line endings normalised to "\n". */
+export type DocumentReader = (start: number, end: number) => string;
 
 /**
  * Remembers the last suggestion shown. While the user types exactly its first characters, the rest
@@ -79,22 +82,19 @@ export interface TypeaheadMatch {
 export class Typeahead {
   private last: Remembered | null = null;
 
-  remember(documentKey: string, offset: number, textBeforeCursor: string, suggestion: string, id: number): void {
-    this.last = { documentKey, offset, tail: textBeforeCursor.slice(-TAIL_CHARS), text: suggestion, id };
+  remember(documentKey: string, offset: number, read: DocumentReader, suggestion: string, id: number): void {
+    this.last = { documentKey, offset, tail: read(Math.max(0, offset - TAIL_CHARS), offset), text: suggestion, id };
   }
 
-  /**
-   * @param offset current cursor offset
-   * @param read returns the document text between two offsets
-   */
-  match(documentKey: string, offset: number, read: (start: number, end: number) => string): TypeaheadMatch | null {
+  /** @param offset current cursor offset */
+  match(documentKey: string, offset: number, read: DocumentReader): TypeaheadMatch | null {
     const last = this.last;
     if (!last || last.documentKey !== documentKey || offset < last.offset) return null;
-    const typedLength = offset - last.offset;
-    if (typedLength >= last.text.length) return null;
-    if (read(last.offset - last.tail.length, last.offset) !== last.tail) return null;
+    if (read(Math.max(0, last.offset - TAIL_CHARS), last.offset) !== last.tail) return null;
+    // Compare text, not offsets: in a CRLF document a typed line break is two characters.
     const typed = read(last.offset, offset);
     if (!last.text.startsWith(typed)) return null;
+    // `rest` is empty when the whole suggestion has been typed (or inserted by accepting it).
     return { rest: last.text.slice(typed.length), typed, id: last.id };
   }
 

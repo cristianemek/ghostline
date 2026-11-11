@@ -61,21 +61,6 @@
         "command": "ghostline.resetCounters",
         "title": "Reiniciar contadores",
         "category": "ghostline"
-      },
-      {
-        "command": "ghostline.learnProjectStyle",
-        "title": "Aprender estilo del proyecto",
-        "category": "ghostline"
-      },
-      {
-        "command": "ghostline.editProjectStyle",
-        "title": "Editar el perfil de estilo del proyecto",
-        "category": "ghostline"
-      },
-      {
-        "command": "ghostline.clearLearning",
-        "title": "Borrar lo aprendido en este proyecto",
-        "category": "ghostline"
       }
     ],
     "configuration": {
@@ -108,6 +93,19 @@
           ],
           "default": "low",
           "description": "Nivel de esfuerzo que se pasa a la CLI con --effort."
+        },
+        "ghostline.reasoning": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "adaptive"
+          ],
+          "enumDescriptions": [
+            "Se pide al modelo que responda directamente. Medido: la mitad de tokens de razonamiento y p50 de ~0,9 s.",
+            "El modelo decide cuándo razonar. Acierta más, pero una petición con razonamiento cuesta ~2x y tarda 2-3 s."
+          ],
+          "default": "minimal",
+          "description": "Cuánto razona el modelo antes de sugerir. Haiku 5.5 razona de forma adaptativa incluso con effort low y no se puede desactivar del todo."
         },
         "ghostline.triggerMode": {
           "type": "string",
@@ -228,20 +226,10 @@
           "minimum": 0,
           "description": "Líneas posteriores al cursor que se envían como máximo."
         },
-        "ghostline.context.symbols": {
-          "type": "boolean",
-          "default": false,
-          "description": "Añade la firma de hasta 3 símbolos de la línea actual, resuelta con el servidor de lenguaje (suma hasta ~400 tokens por petición)."
-        },
         "ghostline.learning.examples": {
           "type": "boolean",
           "default": true,
           "description": "Guarda en local las sugerencias aceptadas y envía hasta 2 parecidas como ejemplo en cada petición."
-        },
-        "ghostline.learning.adaptiveTrigger": {
-          "type": "boolean",
-          "default": true,
-          "description": "Deja de disparar automáticamente durante 24 h en los contextos donde casi nunca aceptas sugerencias."
         },
         "ghostline.debug.logPrompts": {
           "type": "boolean",
@@ -249,7 +237,14 @@
           "description": "Escribe en el log los prompts completos y las respuestas. Desactivado por defecto por privacidad."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "editor.action.inlineSuggest.trigger",
+        "key": "alt+[Backslash]",
+        "when": "editorTextFocus && !editorReadonly"
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",
@@ -258,6 +253,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "node esbuild.mjs --tests && node --test \"out/test/**/*.test.js\"",
+    "test:e2e": "node esbuild.mjs && node test/e2e/run.js",
     "bench": "node esbuild.mjs --scripts && node out/scripts/bench.js",
     "check": "npm run typecheck && npm run lint && npm test",
     "vscode:prepublish": "npm run build:prod",
@@ -267,6 +263,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.19.0",
     "@types/vscode": "~1.98.0",
+    "@vscode/test-electron": "^3.1.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "typescript": "^5.9.3",
