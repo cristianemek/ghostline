@@ -29,6 +29,8 @@ export interface GhostlineConfig {
   maxLines: number;
   requestTimeoutMs: number;
   dailyRequestLimit: number;
+  /** What a whole Claude session (5 h) is worth in API dollars; only used to show ghostline's share of it. */
+  claudeSessionUsd: number;
   disabledLanguages: string[];
   excludePatterns: string[];
   workerMode: WorkerMode;
@@ -110,6 +112,7 @@ export function readConfig(): GhostlineConfig {
     maxLines: Math.min(maxLines, ...workspace('maxLines').map((value) => Math.floor(number(value, maxLines, 1)))),
     requestTimeoutMs: number(user('requestTimeoutMs'), 8000, 1000),
     dailyRequestLimit: Math.floor(number(user('dailyRequestLimit'), 1500)),
+    claudeSessionUsd: number(user('claudeSessionUsd'), 80, 1),
     disabledLanguages: [
       ...new Set([
         ...strings(user('disabledLanguages'), ['markdown', 'plaintext']),

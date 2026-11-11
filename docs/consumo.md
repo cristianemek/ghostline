@@ -48,9 +48,29 @@ v0.7.0, con `speculation: off`, tras aceptar no se pide nada ahí hasta la sigui
 En sentido contrario, la v0.7.0 activa el contexto de símbolos (`docs/fase-3.md`): unas 90 tokens más en las
 peticiones donde hay una definición que traer (+5 %), a cambio de que no se invente campos ni argumentos.
 
-Frente al límite de la suscripción, medido el 11-nov-2026 con los porcentajes que da la propia CLI: un punto
-de la ventana de 5 horas equivale a unas 3.200 sugerencias y uno de la semanal a unas 24.000, suponiendo que
-el medidor pondera cada modelo por su precio de API. El tope de 1.500 peticiones al día ronda el 0,5 %.
+## Qué parte del límite de Claude es de ghostline
+
+Es el segundo porcentaje de la barra de estado (`ghostline 8% · Claude 0,04%`). La CLI solo dice lo llena que
+está la sesión con todo lo que uses Claude; qué parte es de ghostline hay que estimarlo:
+
+**gasto de ghostline en la sesión en curso ÷ lo que vale una sesión entera**, los dos en dólares de API.
+
+- **El gasto** es el coste que la CLI da por cada petición, sumado desde que empezó la sesión de Claude en
+  curso (la CLI dice cuándo acaba y dura 5 horas; si aún no ha dicho nada, las últimas 5 horas). Las
+  peticiones cortadas antes de responder, de las que la CLI no informa, se cuentan como si se hubieran cobrado.
+  Se suma por cuartos de hora enteros.
+- **Lo que vale una sesión** no lo publica Anthropic. Se midió el 11-nov-2026: una conversación de Claude Code
+  gastó 41,78 $ a precio de lista mientras el medidor de la CLI subía 52 puntos, es decir, unos 0,80 $ por
+  punto y **unos 80 $ por sesión** (y 7 puntos de la ventana semanal: unos 6 $ por punto). Es el valor por
+  defecto de `ghostline.claudeSessionUsd`, y depende del plan.
+
+Todo redondea hacia arriba: si ese rato hubo más uso de Claude que el de esa conversación, la sesión vale más
+de 80 $ y la parte de ghostline es menor que la mostrada. El supuesto que no se puede comprobar es que el
+medidor pondere cada modelo por su precio de API; si contara tokens sin distinguir modelo, la parte de
+ghostline sería unas 4 veces la mostrada.
+
+Para situarse: una sugerencia cuesta unos 0,00025 $, así que un punto de la sesión son unas 3.200 sugerencias
+y el tope de 1.500 al día, hecho entero en una sola sesión, ronda el 0,5 %.
 
 ## Si quieres gastar aún menos
 

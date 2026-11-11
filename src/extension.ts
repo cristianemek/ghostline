@@ -22,7 +22,7 @@ import { AdaptiveTrigger, type ContextReport } from './learning/adaptiveTrigger'
 import { ExampleStore } from './learning/exampleStore';
 import { CONTEXT_LABELS, Learning } from './learning/learning';
 import { StyleManager, type Launcher } from './learning/styleManager';
-import { SLOW_P50_MS, dayRow, statusText, tooltipLines, usesApiKey, type SessionInfo } from './usage/report';
+import { SLOW_P50_MS, dayRow, sessionStart, statusText, tooltipLines, usesApiKey, type SessionInfo } from './usage/report';
 import { TokenEstimator } from './usage/tokenEstimator';
 import { UsageTracker, type DayStats } from './usage/usageTracker';
 
@@ -559,6 +559,8 @@ class Ghostline implements vscode.Disposable {
       apiKeySource: this.init?.apiKeySource,
       cliError: this.cliError,
       rateLimit: this.rateLimit,
+      sessionSpentUsd: this.usage.spentSince(sessionStart(this.rateLimit, Date.now())),
+      sessionBudgetUsd: config.claudeSessionUsd,
       trouble: this.provider.trouble,
       muted: this.adaptive
         .report()

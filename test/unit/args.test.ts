@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildCliArgs, buildCliEnv, userMessageLine } from '../../src/cli/args';
 import { formatRequestLine } from '../../src/usage/requestLog';
-import { dayRow, statusText, summaryLine, tooltipLines, usesApiKey, type SessionInfo } from '../../src/usage/report';
+import { dayRow, sessionStart, statusText, summaryLine, tooltipLines, usesApiKey, type SessionInfo } from '../../src/usage/report';
 import { emptyDay } from '../../src/usage/usageTracker';
 
 test('arguments: every flag from the spec, plus --setting-sources project', () => {
@@ -70,6 +70,9 @@ const session: SessionInfo = {
   limitReached: false,
   dailyLimit: 1500,
   apiKeySource: 'none',
+  // 123 completions at 0,00025 $ against a session worth 80 $.
+  sessionSpentUsd: 0.0312,
+  sessionBudgetUsd: 80,
 };
 
 const rateLimit: NonNullable<SessionInfo['rateLimit']> = {
@@ -93,15 +96,23 @@ function busyDay() {
   };
 }
 
-test('status bar text: share of ghostline’s own daily cap · how full Claude’s session is', () => {
-  assert.equal(statusText(busyDay(), { ...session, rateLimit }), 'ghostline 8% · Claude 59%');
-  // Nothing known about the session until the first request of the window.
-  assert.equal(statusText(busyDay(), session), 'ghostline 8% · Claude –');
-  assert.equal(statusText(emptyDay('2026-11-11'), session), 'ghostline 0% · Claude –');
+test('status bar text: share of ghostline’s own daily cap · share of a Claude session ghostline has used', () => {
+  // The second figure is ghostline's own part, not how full the session is (59% here).
+  assert.equal(statusText(busyDay(), { ...session, rateLimit }), 'ghostline 8% · Claude 0,04%');
+  assert.equal(statusText(busyDay(), session), 'ghostline 8% · Claude 0,04%');
+  assert.equal(statusText(emptyDay('2026-11-11'), { ...session, sessionSpentUsd: 0 }), 'ghostline 0% · Claude 0%');
   // Something used never reads as 0%.
-  assert.equal(statusText({ ...emptyDay('2026-11-11'), requests: 11 }, session), 'ghostline <1% · Claude –');
+  assert.equal(
+    statusText({ ...emptyDay('2026-11-11'), requests: 11 }, { ...session, sessionSpentUsd: 0.0005 }),
+    'ghostline <1% · Claude <0,01%',
+  );
+  // The whole daily cap in one session: 1.500 × 0,00025 $.
+  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 0.375 }), 'ghostline 8% · Claude 0,47%');
+  // Fewer decimals as it grows (another model, a smaller plan).
+  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 2.64 }), 'ghostline 8% · Claude 3,3%');
+  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 20 }), 'ghostline 8% · Claude 25%');
   // Without a daily cap there is no share to show: the count.
-  assert.equal(statusText(busyDay(), { ...session, dailyLimit: 0 }), 'ghostline 123 · Claude –');
+  assert.equal(statusText(busyDay(), { ...session, dailyLimit: 0 }), 'ghostline 123 · Claude 0,04%');
   assert.match(statusText(busyDay(), { ...session, paused: true }), /^\$\(debug-pause\) ghostline 8%/);
   assert.match(statusText(busyDay(), { ...session, triggerMode: 'manual' }), /^ghostline \(manual\) 8%/);
   assert.match(statusText(busyDay(), { ...session, limitReached: true }), /^\$\(circle-slash\)/);
@@ -113,10 +124,11 @@ test('tooltip: the two figures explained, acceptance, and warnings; nothing else
   assert.deepEqual(lines, [
     '**ghostline** — modo auto',
     'Tu tope diario: 8% (123 de 1500 peticiones)',
-    'Sesión de Claude (5 h): 59% · semana: 93%',
+    'De la sesión de Claude (5 h), ghostline: ≈0,04% (0,0312 $ de unos 80 $) · la sesión entera va por el 59%',
     'Aceptadas: 34 de 100 (34%)',
   ]);
-  assert.match(tooltipLines(busyDay(), session).join('\n'), /Sesión de Claude: sin datos hasta la primera petición/);
+  // Before the CLI has said anything about the session: ghostline's part only.
+  assert.match(tooltipLines(busyDay(), session).join('\n'), /ghostline: ≈0,04% \(0,0312 \$ de unos 80 \$\)$/m);
   assert.match(tooltipLines(busyDay(), { ...session, dailyLimit: 0 }).join('\n'), /Hoy: 123 peticiones \(sin tope diario\)/);
   assert.match(tooltipLines(busyDay(), { ...session, muted: ['go al final de línea'] }).join('\n'), /Silenciado 24 h: go al final de línea/);
 
@@ -124,6 +136,22 @@ test('tooltip: the two figures explained, acceptance, and warnings; nothing else
   assert.match(withKey, /usa una API key \(`ANTHROPIC_API_KEY`\)/);
   const limited = tooltipLines(busyDay(), { ...session, limitReached: true }).join('\n');
   assert.match(limited, /Límite diario alcanzado \(1500\)/);
+});
+
+test('the Claude session ghostline’s spend is measured against', () => {
+  const now = Date.parse('2026-11-12T10:00:00Z');
+  const hour = 3600_000;
+  const windowEnding = (endMs: number): NonNullable<SessionInfo['rateLimit']> => ({
+    status: 'allowed',
+    windows: { five_hour: { utilization: 0.2, resetsAt: endMs / 1000, status: 'allowed' } },
+  });
+  // The session the CLI last saw ends in two hours: it began three hours ago.
+  assert.equal(sessionStart(windowEnding(now + 2 * hour), now), now - 3 * hour);
+  // That session ended an hour ago: what came after belongs to the next one.
+  assert.equal(sessionStart(windowEnding(now - hour), now), now - hour);
+  // Nothing reported yet, or something stale: the last five hours.
+  assert.equal(sessionStart(undefined, now), now - 5 * hour);
+  assert.equal(sessionStart(windowEnding(now - 9 * hour), now), now - 5 * hour);
 });
 
 test('usesApiKey: only "none" (or nothing yet) means subscription', () => {

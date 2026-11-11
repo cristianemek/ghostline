@@ -104,6 +104,61 @@ test('tracker: tokens of requests cut off before answering are kept apart, not c
   assert.equal(new UsageTracker(store, clock('2026-11-11T10:00:00').now).today().unconfirmedTokens, 0);
 });
 
+test('tracker: spend by time, for the share of a Claude session that is ghostline’s', async () => {
+  const store = memoryStore();
+  const time = clock('2026-11-11T22:50:00Z');
+  const tracker = new UsageTracker(store, time.now);
+  const at = (iso: string): number => Date.parse(iso);
+  const close = (actual: number, expected: number): void => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} ≠ ${expected}`);
+
+  tracker.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.00025, totalMs: 900 });
+  tracker.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.00025, totalMs: 900 });
+  // The session runs across midnight: the calendar day does not matter here.
+  time.set('2026-11-12T00:20:00Z');
+  tracker.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.0003, totalMs: 900 });
+  close(tracker.spentSince(at('2026-11-11T22:00:00Z')), 0.0008);
+  close(tracker.spentSince(at('2026-11-12T00:00:00Z')), 0.0003);
+  // Whole quarters of an hour: a session that began at 22:55 still counts the 22:45 quarter.
+  close(tracker.spentSince(at('2026-11-11T22:55:00Z')), 0.0008);
+  close(tracker.spentSince(at('2026-11-11T23:00:00Z')), 0.0003);
+  assert.equal(tracker.spentSince(at('2026-11-12T00:30:00Z')), 0);
+
+  // A request cut off before answering is priced as if billed, at today's measured rate per token
+  // (which requests count as today's depends on the time zone the test runs in).
+  const today = tracker.today();
+  tracker.recordUnconfirmed(1900);
+  close(tracker.spentSince(at('2026-11-12T00:00:00Z')), 0.0003 + 1900 * (today.costUsd / today.inputTokens));
+  assert.equal(tracker.today().costUsd, today.costUsd);
+  const total = tracker.spentSince(at('2026-11-11T22:00:00Z'));
+
+  // Another window adds to it instead of overwriting; both see the total after flushing.
+  await tracker.flush();
+  const other = new UsageTracker(store, time.now);
+  close(other.spentSince(at('2026-11-11T22:00:00Z')), total);
+  other.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.001, totalMs: 900 });
+  await other.flush();
+  await tracker.flush();
+  close(tracker.spentSince(at('2026-11-11T22:00:00Z')), total + 0.001);
+
+  // Kept for eight days, then dropped.
+  time.set('2026-11-21T00:00:00Z');
+  tracker.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.00025, totalMs: 900 });
+  await tracker.flush();
+  close(new UsageTracker(store, time.now).spentSince(0), 0.00025);
+  await tracker.reset();
+  assert.equal(new UsageTracker(store, time.now).spentSince(0), 0);
+});
+
+test('tracker: a cut-off request before anything was measured is priced as a typical completion', () => {
+  const tracker = new UsageTracker(memoryStore(), clock('2026-11-11T10:00:00Z').now);
+  tracker.recordUnconfirmed(1900);
+  assert.ok(Math.abs(tracker.spentSince(0) - 0.00025) < 1e-9);
+  // A broken or foreign value in storage is ignored.
+  const store = memoryStore();
+  store.data.set('ghostline.spend.v1', [['x', 1], [Date.parse('2026-11-11T09:00:00Z'), -3], 'nope', [Date.parse('2026-11-11T09:00:00Z'), 0.5]]);
+  assert.equal(new UsageTracker(store, clock('2026-11-11T10:00:00Z').now).spentSince(0), 0.5);
+});
+
 test('tracker: acceptance rate is undefined until something was shown', () => {
   const tracker = new UsageTracker(memoryStore());
   assert.equal(acceptanceRate(tracker.today()), undefined);

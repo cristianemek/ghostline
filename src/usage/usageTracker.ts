@@ -54,6 +54,16 @@ export interface RequestRecord {
 }
 
 const STORE_KEY = 'ghostline.usage.v1';
+/**
+ * What ghostline has spent, in API-equivalent dollars, by quarter of an hour: [start of the quarter
+ * in ms, dollars]. The days above follow the local calendar; a Claude session starts whenever it
+ * starts, so its share needs spend by time.
+ */
+const SPEND_KEY = 'ghostline.spend.v1';
+const SPEND_BUCKET_MS = 15 * 60_000;
+const SPEND_KEEP_MS = 8 * 24 * 3600_000;
+/** A typical completion (≈1.900 tokens of Haiku), for pricing a cut-off request before any has been measured. */
+const FALLBACK_USD_PER_INPUT_TOKEN = 0.00025 / 1900;
 const KEEP_DAYS = 30;
 const MAX_SAMPLES_PER_DAY = 400;
 const COUNTERS = [
@@ -152,6 +162,8 @@ function sanitizeDay(raw: unknown): DayStats | null {
 export class UsageTracker {
   private stored = new Map<string, DayStats>();
   private pending = new Map<string, DayStats>();
+  private storedSpend = new Map<number, number>();
+  private pendingSpend = new Map<number, number>();
   private dirty = false;
 
   constructor(
@@ -170,6 +182,7 @@ export class UsageTracker {
     day.cacheReadTokens += record.usage.cacheReadTokens;
     day.cacheWriteTokens += record.usage.cacheWriteTokens;
     day.costUsd += record.costUsd;
+    this.addSpend(record.costUsd);
     if (record.status === 'error') day.errors++;
     else if (record.status === 'timeout') day.timeouts++;
     else if (record.status === 'cancelled') day.cancelled++;
@@ -192,8 +205,29 @@ export class UsageTracker {
 
   /** A request that reached the API but was cut off before any usage was reported. */
   recordUnconfirmed(estimatedInputTokens: number): void {
-    this.pendingToday().unconfirmedTokens += Math.max(0, Math.round(estimatedInputTokens));
+    const tokens = Math.max(0, Math.round(estimatedInputTokens));
+    // Priced as if it had been billed, at what today's confirmed requests cost per input token: the
+    // share of Claude's limit shown to the user must not come out lower than the real one.
+    const day = this.today();
+    const measuredTokens = day.inputTokens + day.cacheReadTokens + day.cacheWriteTokens;
+    const usdPerToken = day.costUsd > 0 && measuredTokens > 0 ? day.costUsd / measuredTokens : FALLBACK_USD_PER_INPUT_TOKEN;
+    this.pendingToday().unconfirmedTokens += tokens;
+    this.addSpend(tokens * usdPerToken);
     this.dirty = true;
+  }
+
+  /**
+   * API-equivalent dollars spent since `sinceMs`, cut-off requests included at their estimate. Counts
+   * whole quarters of an hour, so it can only err on the high side.
+   */
+  spentSince(sinceMs: number): number {
+    let total = 0;
+    for (const spend of [this.storedSpend, this.pendingSpend]) {
+      for (const [start, usd] of spend) {
+        if (start + SPEND_BUCKET_MS > sinceMs) total += usd;
+      }
+    }
+    return total;
   }
 
   recordLocalHit(): void {
@@ -245,17 +279,32 @@ export class UsageTracker {
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, KEEP_DAYS)
       .map((day) => (day.date === today ? day : compactDay(day)));
+    const oldest = this.now().getTime() - SPEND_KEEP_MS;
+    const spend = new Map([...this.storedSpend].filter(([start]) => start >= oldest));
+    for (const [start, usd] of this.pendingSpend) spend.set(start, (spend.get(start) ?? 0) + usd);
     this.pending.clear();
+    this.pendingSpend.clear();
     this.dirty = false;
     this.stored = new Map(kept.map((day) => [day.date, day]));
+    this.storedSpend = spend;
     await this.store.update(STORE_KEY, kept);
+    await this.store.update(SPEND_KEY, [...spend].sort((a, b) => a[0] - b[0]));
   }
 
   async reset(): Promise<void> {
     this.pending.clear();
     this.stored.clear();
+    this.pendingSpend.clear();
+    this.storedSpend.clear();
     this.dirty = false;
     await this.store.update(STORE_KEY, []);
+    await this.store.update(SPEND_KEY, []);
+  }
+
+  private addSpend(usd: number): void {
+    if (!(usd > 0)) return;
+    const start = Math.floor(this.now().getTime() / SPEND_BUCKET_MS) * SPEND_BUCKET_MS;
+    this.pendingSpend.set(start, (this.pendingSpend.get(start) ?? 0) + usd);
   }
 
   private day(date: string): DayStats {
@@ -277,10 +326,19 @@ export class UsageTracker {
   private reload(): void {
     const raw = this.store.get<unknown>(STORE_KEY);
     this.stored = new Map();
-    if (!Array.isArray(raw)) return;
-    for (const item of raw) {
-      const day = sanitizeDay(item);
-      if (day) this.stored.set(day.date, day);
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        const day = sanitizeDay(item);
+        if (day) this.stored.set(day.date, day);
+      }
+    }
+    const spend = this.store.get<unknown>(SPEND_KEY);
+    this.storedSpend = new Map();
+    if (!Array.isArray(spend)) return;
+    for (const item of spend) {
+      if (!Array.isArray(item)) continue;
+      const [start, usd] = item as unknown[];
+      if (typeof start === 'number' && typeof usd === 'number' && Number.isFinite(start) && usd > 0) this.storedSpend.set(start, usd);
     }
   }
 }

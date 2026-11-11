@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "icon": "resources/icon.png",
   "private": true,
   "publisher": "cristianemek",
@@ -189,6 +189,13 @@
           "default": 1500,
           "minimum": 0,
           "description": "Peticiones diarias a partir de las cuales se pausa el modo auto (el manual sigue funcionando). 0 = sin límite.",
+          "scope": "application"
+        },
+        "ghostline.claudeSessionUsd": {
+          "type": "number",
+          "default": 80,
+          "minimum": 1,
+          "description": "Lo que vale una sesión entera de Claude (la ventana de 5 horas de tu suscripción) en dólares de API. Solo sirve para calcular el segundo porcentaje de la barra de estado: qué parte de la sesión ha gastado ghostline. Anthropic no publica la cifra; 80 se midió el 11-nov-2026 con este plan (ver docs/consumo.md) y está tirando a bajo, así que el porcentaje sale, como mucho, algo alto. Cámbialo si cambias de plan.",
           "scope": "application"
         },
         "ghostline.disabledLanguages": {

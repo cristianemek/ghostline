@@ -19,6 +19,23 @@ export interface SessionInfo {
   trouble?: { remainingMs: number; reason: string };
   /** Language/context pairs muted by the adaptive trigger, already formatted. */
   muted?: string[];
+  /** What ghostline has spent since the current Claude session began, in API-equivalent dollars. */
+  sessionSpentUsd: number;
+  /** What a whole Claude session is worth in the same dollars (`ghostline.claudeSessionUsd`). */
+  sessionBudgetUsd: number;
+}
+
+const FIVE_HOURS_MS = 5 * 3600_000;
+
+/**
+ * When the Claude session ghostline's spend is measured against began. The CLI says when the
+ * session it last saw ends; it lasts five hours. Once that one is over, what was spent after it
+ * belongs to the next. With nothing reported yet, the last five hours stand in for it.
+ */
+export function sessionStart(rateLimit: RateLimitInfo | undefined, nowMs: number): number {
+  const resetsAt = (rateLimit?.windows.five_hour?.resetsAt ?? 0) * 1000;
+  if (resetsAt > nowMs) return resetsAt - FIVE_HOURS_MS;
+  return Math.max(resetsAt, nowMs - FIVE_HOURS_MS);
 }
 
 function percent(rate: number | undefined): string {
@@ -36,10 +53,25 @@ function dailyShare(day: DayStats, dailyLimit: number): string {
   return dailyLimit > 0 ? share(day.requests / dailyLimit) : String(day.requests);
 }
 
-/** How full Claude's current session (the subscription's 5-hour window) is, as the CLI last reported it. */
-function sessionShare(rateLimit: RateLimitInfo | undefined): string {
-  const window = rateLimit?.windows.five_hour;
-  return window ? share(window.utilization) : '–';
+/**
+ * A share that is usually a small fraction of one percent, with enough digits to tell 0,03% from
+ * 0,3%: two decimals under 1%, one under 10%.
+ */
+function fineShare(rate: number): string {
+  const value = rate * 100;
+  if (!(value > 0)) return '0%';
+  if (value < 0.01) return '<0,01%';
+  const digits = value < 1 ? 2 : value < 10 ? 1 : 0;
+  return `${value.toFixed(digits).replace('.', ',')}%`;
+}
+
+/**
+ * The part of a whole Claude session (the subscription's 5-hour window) that ghostline itself has
+ * used. An estimate: Anthropic publishes no formula, so it is ghostline's spend at API prices over
+ * what a session was measured to be worth (see docs/consumo.md), both on the high side.
+ */
+function sessionShare(session: SessionInfo): string {
+  return session.sessionBudgetUsd > 0 ? fineShare(session.sessionSpentUsd / session.sessionBudgetUsd) : '–';
 }
 
 function ms(value: number | undefined): string {
@@ -56,13 +88,14 @@ export function usesApiKey(apiKeySource: string | undefined): boolean {
 }
 
 /**
- * `ghostline 8% · Claude 59%`: how much of ghostline's own daily cap is used, and how full Claude's
- * session is. (The spec asked for requests · tokens · acceptance; in use, these two were the ones
- * worth a glance. The rest is one click away, in the last-7-days list and the log.)
+ * `ghostline 8% · Claude 0,03%`: how much of ghostline's own daily cap is used, and how much of a
+ * whole Claude session ghostline has taken. (The spec asked for requests · tokens · acceptance; in
+ * use, these two were the ones worth a glance. The rest is one click away, in the last-7-days list
+ * and the log.)
  */
 export function statusText(day: DayStats, session: SessionInfo): string {
   if (session.cliError) return '$(warning) ghostline: sin CLI';
-  const counters = `${dailyShare(day, session.dailyLimit)} · Claude ${sessionShare(session.rateLimit)}`;
+  const counters = `${dailyShare(day, session.dailyLimit)} · Claude ${sessionShare(session)}`;
   if (session.paused) return `$(debug-pause) ghostline ${counters}`;
   if (session.trouble) return `$(warning) ghostline ${counters}`;
   if (session.limitReached) return `$(circle-slash) ghostline ${counters}`;
@@ -96,11 +129,11 @@ export function tooltipLines(day: DayStats, session: SessionInfo): string[] {
       ? `Tu tope diario: ${dailyShare(day, session.dailyLimit)} (${day.requests} de ${session.dailyLimit} peticiones)`
       : `Hoy: ${day.requests} peticiones (sin tope diario)`,
   );
-  const week = session.rateLimit?.windows.seven_day;
+  const whole = session.rateLimit?.windows.five_hour;
   lines.push(
-    session.rateLimit?.windows.five_hour
-      ? `Sesión de Claude (5 h): ${sessionShare(session.rateLimit)}` + (week ? ` · semana: ${share(week.utilization)}` : '')
-      : 'Sesión de Claude: sin datos hasta la primera petición',
+    `De la sesión de Claude (5 h), ghostline: ≈${sessionShare(session)} ` +
+      `(${usd(session.sessionSpentUsd)} de unos ${Math.round(session.sessionBudgetUsd)} $)` +
+      (whole ? ` · la sesión entera va por el ${share(whole.utilization)}` : ''),
   );
   lines.push(`Aceptadas: ${day.accepted} de ${day.shown} (${percent(acceptanceRate(day))})`);
   if (session.muted && session.muted.length > 0) lines.push(`Silenciado 24 h: ${session.muted.join(', ')}`);

@@ -53,6 +53,8 @@ test('status bar and tooltip say when automatic suggestions are paused by errors
     paused: false,
     limitReached: false,
     dailyLimit: 1500,
+    sessionSpentUsd: 0,
+    sessionBudgetUsd: 80,
     trouble: { remainingMs: 41_500, reason: 'Invalid API key · Please run /login' },
   };
   assert.match(statusText(emptyDay('2026-11-11'), session), /^\$\(warning\) ghostline /);
