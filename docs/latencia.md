@@ -42,7 +42,8 @@ Todo ocurre alrededor de la petición, no dentro:
 
 1. **La petición en curso ya no muere con la siguiente tecla.** Si lo que tecleas coincide con lo que el modelo
    va respondiendo, se usa esa respuesta: aparece cuando aterriza, sin lanzar otra petición ni volver a
-   esperar. Se descarta en cuanto diverge, si pasa 1 s sin decir nada (está razonando) o si mueves el cursor.
+   esperar. Se descarta en cuanto diverge o si mueves el cursor. (En la v0.5.0 también se abandonaba si pasaba
+   1 s sin decir nada; se quitó en la v0.6.0, ver el final de esta página.)
 2. **Una respuesta que llega mientras tecleas** se guarda y se le pide al editor que la muestre en ese momento.
 3. **Sin espera tras aceptar** una sugerencia: la siguiente se pide al instante.
 4. **Una apuesta por línea nueva**: en una línea vacía la espera es corta (120 ms, o 1,6 veces tu ritmo de
