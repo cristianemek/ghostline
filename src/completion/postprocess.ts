@@ -46,6 +46,8 @@ const PROSE_LANGUAGES = new Set([
 const WORD_CHAR = /[A-Za-z0-9_$]/;
 const COMMENT_START = /^(\/\/|\/\*|\*|#|--|<!--|;|"""|''')/;
 const CLOSERS_ONLY = /^[)\]}]+[;,]?$/;
+/** The line ends in a comma, or in an assignment or comparison written with a space before it ("x :=", "a ==", "() =>"). */
+const SPACED_END = /(?:,|\s(?::=|=>|[-+*/%&|^<>!=]?=))$/;
 const OPENERS: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
 const CLOSERS = new Set([')', ']', '}']);
 
@@ -466,7 +468,10 @@ export function postprocess(input: PostprocessInput): string {
   text = text.replace(/^(?:\\[st])+/, '');
   if (isChatter(text, lineContent)) return '';
   if (!(input.languageId && PROSE_LANGUAGES.has(input.languageId))) text = cutAtSelfTalk(text, prefix, lineContent);
-  text = cutAtProse(text, prefix, lineContent, input.languageId).replace(/\s+$/, '');
+  text = cutAtProse(text, prefix, lineContent, input.languageId);
+  // Remembered for a completion that lands in front of more code on the same line (see the end).
+  let spaceAtEnd = /\S[ \t]+$/.test(text);
+  text = text.replace(/\s+$/, '');
   if (!text.trim()) return '';
 
   if (lineContent === '') {
@@ -485,8 +490,10 @@ export function postprocess(input: PostprocessInput): string {
   }
   if (!text.trim()) return '';
 
-  text = reindent(text, linePrefix, indent);
-  text = removeSuffixOverlap(text, linePrefix, suffix, tabSize);
+  const reindented = reindent(text, linePrefix, indent);
+  text = removeSuffixOverlap(reindented, linePrefix, suffix, tabSize);
+  // The model restated what follows the cursor and a space separated it from the new part.
+  if (text.length < reindented.length && /[ \t]/.test(reindented[text.length] ?? '')) spaceAtEnd = true;
   text = limitLines(text, input.maxLines).replace(/\s+$/, '');
   if (!text.trim()) return '';
 
@@ -494,6 +501,12 @@ export function postprocess(input: PostprocessInput): string {
   const newline = suffix.indexOf('\n');
   const rest = newline < 0 ? suffix : suffix.slice(0, newline);
   if (!text.includes('\n') && rest.trim() !== '' && rest.trimStart().startsWith(text.trim())) return '';
+
+  // In front of more code on the same line the separating space is part of the completion:
+  // "conversation, |c.run()" + "err := ". Kept when the model wrote it, added after a comma or an
+  // operator that the line writes with spaces around it.
+  const codeFollows = !text.includes('\n') && rest !== '' && !/^[\s)\]}.,;:]/.test(rest);
+  if (codeFollows && (spaceAtEnd || SPACED_END.test(linePrefix + text))) return text + ' ';
 
   return text;
 }

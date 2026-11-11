@@ -6,6 +6,7 @@ import { resolveCli } from './cli/resolveCli';
 import type { InitInfo, RateLimitInfo } from './cli/streamParser';
 import { WorkerPool } from './cli/workerPool';
 import { ACCEPT_COMMAND, GhostlineProvider } from './completion/provider';
+import { typedInsertionEnd } from './completion/trigger';
 import {
   affectsGhostline,
   affectsPool,
@@ -386,7 +387,7 @@ class Ghostline implements vscode.Disposable {
   private onDocumentChange(event: vscode.TextDocumentChangeEvent): void {
     if (event.contentChanges.length === 0 || event.reason !== undefined) return;
     if (event.document !== vscode.window.activeTextEditor?.document) return;
-    this.provider.noteKeystroke();
+    this.provider.noteKeystroke(event.document.uri.toString(), typedInsertionEnd(event.contentChanges));
     // Typing is the best predictor of a request: make sure a process is warming up.
     if (!this.config.enabled || this.paused) return;
     const { scheme } = event.document.uri;

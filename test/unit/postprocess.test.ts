@@ -219,6 +219,24 @@ test('suffix overlap: same line', () => {
   assert.equal(run('items[0]', 'use(', ')'), 'items[0]');
 });
 
+test('in front of more code on the same line the separating space is part of the completion', () => {
+  const rest = 'c.queries.CreateConversation(ctx, gen.CreateConversationParams{\n\t\t\tChannel: in.Channel,';
+  // Seen with the real CLI: once with the space, once without it.
+  assert.equal(run('err := ', '\t\tconversation, ', rest, { indent: TABS }), 'err := ');
+  assert.equal(run('err :=', '\t\tconversation, ', rest, { indent: TABS }), 'err := ');
+  // The model restates the rest of the line: only the new part, with its space.
+  assert.equal(run('err := c.queries.CreateConversation(ctx, gen.CreateConversationParams{', '\t\tconversation, ', rest, { indent: TABS }), 'err := ');
+  assert.equal(run('total ', 'const ', 'compute(a, b);'), 'total ');
+  assert.equal(run('first,', 'call(', 'second)'), 'first, ');
+  assert.equal(run('=', 'const total ', 'compute(a, b);'), '= ');
+  // No space where the code has none, or where a closer or punctuation follows.
+  assert.equal(run('=', 'run(retries', '3)'), '=');
+  assert.equal(run('user', 'log(', '.name)'), 'user');
+  assert.equal(run('a, b ', 'foo(', ')'), 'a, b');
+  // At the end of the line trailing whitespace is still dropped.
+  assert.equal(run('err := ', '\t\tconversation, ', '\n\t\tnext()', { indent: TABS }), 'err :=');
+});
+
 test('suffix overlap: identical to what follows the cursor', () => {
   assert.equal(run(');', 'foo(a', ');'), '');
   assert.equal(run('b)', 'foo(a, ', 'b)'), '');

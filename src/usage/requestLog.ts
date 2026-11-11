@@ -4,7 +4,7 @@ export interface RequestLogEntry {
   id: number;
   time: Date;
   languageId: string;
-  /** Where the cursor was: after-dot, after-paren, new-line or end-of-line. */
+  /** Where the cursor was: after-dot, after-paren, new-line, end-of-line or mid-line. */
   context: string;
   manual: boolean;
   waitForWorkerMs: number;

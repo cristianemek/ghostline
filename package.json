@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "publisher": "cristianemek",
   "license": "UNLICENSED",
@@ -157,6 +157,12 @@
           "default": "off",
           "scope": "application",
           "description": "Si ghostline se adelanta a tu pausa para que la sugerencia esté antes. En ambos casos, una petición ya enviada se aprovecha mientras lo que tecleas coincide con lo que responde."
+        },
+        "ghostline.midLine": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "En modo auto, sugerir también en mitad de una línea (con código detrás del cursor) justo donde acabas de teclear: por ejemplo «conversation, |c.queries.Create(…)» → «err := ». Nunca dentro de una palabra, una cadena o un comentario, ni al pegar o borrar. Desactívalo para que solo se sugiera al final de la línea o ante caracteres de cierre, que gasta menos."
         },
         "ghostline.eagerDebounceMs": {
           "type": "number",

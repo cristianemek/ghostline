@@ -19,6 +19,7 @@ import {
   cursorAllowsAuto,
   debounceDelay,
   eagerDelay,
+  midLineAllowsAuto,
   wait,
   type TriggerContext,
 } from './trigger';
@@ -168,6 +169,8 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
   private arrived: Arrival | null = null;
   private acceptedAt = 0;
   private refreshAt = 0;
+  /** Where the user's last hand-typed insertion ended; null after any other kind of edit. */
+  private typedAt: { documentKey: string; offset: number } | null = null;
   private nextId = 1;
   /** A suggestion dismissed sooner than this was never really seen. */
   minVisibleMs = 750;
@@ -194,9 +197,13 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     }
   }
 
-  /** Call on every edit that looks like typing. */
-  noteKeystroke(): void {
+  /**
+   * Call on every edit that looks like typing. `typedEnd` is where it ended when it was a plain
+   * hand-typed insertion (see `typedInsertionEnd`).
+   */
+  noteKeystroke(documentKey?: string, typedEnd?: number): void {
     this.typing.record(Date.now());
+    this.typedAt = documentKey !== undefined && typedEnd !== undefined ? { documentKey, offset: typedEnd } : null;
   }
 
   /** The item's command ran: the suggestion was accepted. */
@@ -263,7 +270,9 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     const lineText = document.lineAt(position.line).text;
     const linePrefix = lineText.slice(0, position.character);
     const restOfLine = lineText.slice(position.character);
-    const triggerContext = classifyContext(linePrefix);
+    const triggerContext = classifyContext(linePrefix, restOfLine);
+    // Code (not just closing characters) follows the cursor on this line.
+    const codeAfter = !cursorAllowsAuto(restOfLine);
     const indent = indentStyleOf(document);
 
     const firstLine = Math.max(0, position.line - config.prefixLines);
@@ -325,7 +334,13 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     // 4. Rules that only apply to automatic triggering.
     if (!manual) {
       if (config.disabledLanguages.includes(languageId)) return undefined;
-      if (!cursorAllowsAuto(restOfLine)) return undefined;
+      if (codeAfter) {
+        // In the middle of a line only right where the user has just typed something by hand: an
+        // insertion in front of existing code ("conversation, |c.queries.Create(…)"). Deleting,
+        // pasting or merely placing the cursor there asks for nothing.
+        const justTyped = this.typedAt?.documentKey === documentKey && this.typedAt.offset === offset;
+        if (!config.midLine || !justTyped || !midLineAllowsAuto(linePrefix, restOfLine)) return undefined;
+      }
       // The IntelliSense popup is open: an inline suggestion would be hidden behind it anyway.
       if (context.selectedCompletionInfo) return undefined;
       if (config.adaptiveTrigger && deps.learning?.isSuppressed(languageId, triggerContext)) return undefined;
@@ -463,7 +478,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       }
       this.breaker.success();
 
-      const text = postprocess({
+      let text = postprocess({
         raw: outcome.text,
         prefix: built.prefix,
         suffix: built.suffix,
@@ -471,6 +486,12 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
         indent,
         languageId,
       });
+      if (codeAfter) {
+        // Between two pieces of code only one line fits; an answer that starts on a new line was
+        // meant for somewhere else.
+        text = text.split('\n')[0] ?? '';
+        if (!text.trim()) text = '';
+      }
       this.cache.set(key, text);
       if (!text) {
         deps.log(formatRequestLine(logEntry, 'vacía'));
@@ -671,6 +692,8 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     let label: string = outcome;
     if (outcome === 'aceptada') {
       this.acceptedAt = Date.now();
+      // What is in the document now was suggested, not typed: no follow-up request in mid-line.
+      this.typedAt = null;
       deps.usage.recordAccepted();
       deps.learning?.onAccepted(live);
     } else if (outcome === 'ignorada') {

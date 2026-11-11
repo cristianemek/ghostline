@@ -19,6 +19,7 @@ export const CONTEXT_LABELS: Record<TriggerContext, string> = {
   'after-paren': 'tras «(»',
   'new-line': 'en línea nueva',
   'end-of-line': 'al final de línea',
+  'mid-line': 'en mitad de línea',
 };
 
 /**

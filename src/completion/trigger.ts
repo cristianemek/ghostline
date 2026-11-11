@@ -5,10 +5,43 @@ export function cursorAllowsAuto(restOfLine: string): boolean {
   return ONLY_CLOSERS_AFTER_CURSOR.test(restOfLine);
 }
 
-/** Where the cursor is, for the adaptive trigger's acceptance statistics. */
-export type TriggerContext = 'after-dot' | 'after-paren' | 'new-line' | 'end-of-line';
+const WORD_CHAR = /[A-Za-z0-9_$]/;
+/** Longest edit still taken for typing by hand (a character, or a pair the editor closed for you). */
+const MAX_TYPED_CHARS = 2;
 
-export function classifyContext(linePrefix: string): TriggerContext {
+/**
+ * Where a hand-typed insertion ended, as a document offset. Undefined for anything else: a deletion,
+ * a replacement, a paste, an accepted suggestion or a multi-cursor edit.
+ */
+export function typedInsertionEnd(
+  changes: readonly { rangeOffset: number; rangeLength: number; text: string }[],
+): number | undefined {
+  const change = changes.length === 1 ? changes[0] : undefined;
+  if (!change || change.rangeLength !== 0 || change.text.length === 0 || change.text.length > MAX_TYPED_CHARS) return undefined;
+  return change.rangeOffset + change.text.length;
+}
+
+/**
+ * Auto mode with code after the cursor on the same line ("conversation, |c.queries.Create(…)"): worth
+ * a request only where an insertion makes sense. Not on a line with nothing typed before the cursor,
+ * not in the middle of a word, and not inside a string or a comment, where it is text being edited.
+ * The caller also requires that the user has just typed right there.
+ */
+export function midLineAllowsAuto(linePrefix: string, restOfLine: string): boolean {
+  if (linePrefix.trim() === '' || restOfLine.trim() === '') return false;
+  const before = linePrefix.at(-1) ?? '';
+  const after = restOfLine[0] ?? '';
+  if (WORD_CHAR.test(before) && WORD_CHAR.test(after)) return false;
+  if ((linePrefix.match(/["'`]/g)?.length ?? 0) % 2 === 1) return false;
+  return !/\/\/|\/\*|^\s*(?:#|\*|--)/.test(linePrefix);
+}
+
+/** Where the cursor is, for the adaptive trigger's acceptance statistics. */
+export type TriggerContext = 'after-dot' | 'after-paren' | 'new-line' | 'end-of-line' | 'mid-line';
+
+export function classifyContext(linePrefix: string, restOfLine = ''): TriggerContext {
+  // Code after the cursor is a different situation whatever comes before it.
+  if (linePrefix.trim() !== '' && !cursorAllowsAuto(restOfLine)) return 'mid-line';
   const trimmed = linePrefix.trimEnd();
   if (trimmed.trim() === '') return 'new-line';
   if (trimmed.endsWith('.')) return 'after-dot';

@@ -7,6 +7,8 @@ import {
   cursorAllowsAuto,
   debounceDelay,
   eagerDelay,
+  midLineAllowsAuto,
+  typedInsertionEnd,
   wait,
 } from '../../src/completion/trigger';
 
@@ -19,7 +21,49 @@ test('auto mode fires at the end of the line or before closing characters only',
   }
 });
 
+test('in the middle of a line auto mode only asks where an insertion makes sense', () => {
+  const call = 'c.queries.CreateConversation(ctx, gen.CreateConversationParams{';
+  assert.equal(midLineAllowsAuto('\t\tconversation, ', call), true);
+  assert.equal(midLineAllowsAuto('\t\tconversation,', call), true);
+  assert.equal(midLineAllowsAuto('  const ', 'compute(a, b);'), true);
+  assert.equal(midLineAllowsAuto('  call(first, ', 'last)'), true);
+  // Nothing typed on the line yet, or nothing but whitespace after the cursor.
+  assert.equal(midLineAllowsAuto('\t\t', call), false);
+  assert.equal(midLineAllowsAuto('  const x = ', '  '), false);
+  // Inside a word: a rename, not an insertion.
+  assert.equal(midLineAllowsAuto('\t\tconversation', call), false);
+  assert.equal(midLineAllowsAuto('  const tot', 'al = 1;'), false);
+  // Inside a string or a comment it is text being edited.
+  assert.equal(midLineAllowsAuto('  log("user ', 'created");'), false);
+  assert.equal(midLineAllowsAuto('  // the ', 'first item'), false);
+  assert.equal(midLineAllowsAuto('  # the ', 'first item'), false);
+  assert.equal(midLineAllowsAuto('  x = 1 /* the ', 'first */'), false);
+});
+
+test('only a short plain insertion counts as typed by hand', () => {
+  assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 0, text: 'a' }]), 11);
+  // A pair closed by the editor.
+  assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 0, text: '()' }]), 12);
+  // Deletion, replacement, paste or accepted suggestion, multi-cursor, nothing.
+  assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 1, text: '' }]), undefined);
+  assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 3, text: 'a' }]), undefined);
+  assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 0, text: 'err := ' }]), undefined);
+  assert.equal(
+    typedInsertionEnd([
+      { rangeOffset: 10, rangeLength: 0, text: 'a' },
+      { rangeOffset: 40, rangeLength: 0, text: 'a' },
+    ]),
+    undefined,
+  );
+  assert.equal(typedInsertionEnd([]), undefined);
+});
+
 test('context classification', () => {
+  assert.equal(classifyContext('  conversation, ', 'c.run(ctx)'), 'mid-line');
+  assert.equal(classifyContext('  foo(', 'a, b)'), 'mid-line');
+  // Closing characters after the cursor do not make it the middle of a line.
+  assert.equal(classifyContext('  foo(', ')'), 'after-paren');
+  assert.equal(classifyContext('    ', 'existing();'), 'new-line');
   assert.equal(classifyContext(''), 'new-line');
   assert.equal(classifyContext('    '), 'new-line');
   assert.equal(classifyContext('  user.'), 'after-dot');

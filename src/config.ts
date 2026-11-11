@@ -24,6 +24,8 @@ export interface GhostlineConfig {
   /** Shorter wait used at trigger points (new line, after ".", "(", "="…). */
   eagerDebounceMs: number;
   speculation: Speculation;
+  /** Auto mode also asks right after typing in the middle of a line, with code after the cursor. */
+  midLine: boolean;
   maxLines: number;
   requestTimeoutMs: number;
   dailyRequestLimit: number;
@@ -126,6 +128,8 @@ export function readConfig(): GhostlineConfig {
     promptCache: oneOf(user('promptCache'), ['auto', 'on', 'off'] as const, 'auto'),
     reasoning: oneOf(user('reasoning'), ['minimal', 'adaptive'] as const, 'adaptive'),
     speculation: oneOf(user('speculation'), ['off', 'line'] as const, 'off'),
+    // More requests, so the user's call; a workspace can only switch it off.
+    midLine: user('midLine') !== false && workspace('midLine').every((value) => value !== false),
     prefixLines: Math.min(prefixLines, ...workspace('context.prefixLines').map((value) => Math.floor(number(value, prefixLines, 1)))),
     suffixLines: Math.min(suffixLines, ...workspace('context.suffixLines').map((value) => Math.floor(number(value, suffixLines)))),
     symbolContext: user('context.symbols') === true,

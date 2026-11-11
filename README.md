@@ -27,12 +27,16 @@ latencia después (la spec original ponía la latencia por delante de la calidad
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.6.0.vsix
+code --install-extension ghostline-0.6.1.vsix
 ```
 
 ## Uso
 
 - **Modo auto** (por defecto): al dejar de teclear aparece la sugerencia en gris. `Tab` la acepta, `Esc` la descarta.
+  Se pide al final de la línea o ante caracteres de cierre y, desde la v0.6.1, también en mitad de una línea
+  justo donde acabas de teclear (`conversation, |c.queries.Create(…)` → `err := `); la spec original no lo
+  contemplaba. Ahí la sugerencia es de una sola línea, y no se pide dentro de una palabra, una cadena o un
+  comentario, ni al pegar, borrar o mover el cursor. Se apaga con `ghostline.midLine: false`.
 - **Modo manual** (`ghostline.triggerMode: "manual"`): solo sugiere al invocar *Desencadenar sugerencia insertada*
   (`editor.action.inlineSuggest.trigger`). VS Code 1.144 ya no trae atajo por defecto para ese comando, así que
   ghostline le asigna `Alt+\` (la tecla física `\` del teclado US; en teclado español es `Alt+ç`). Se cambia en
@@ -65,7 +69,8 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
   confirmas y guarda una guía de ~200 tokens que puedes editar. Se añade a las peticiones en archivos nuevos o
   cortos, donde no hay código del que deducir el estilo.
 - **Disparo adaptativo**: si en un contexto (por ejemplo, TypeScript tras un punto) aceptas menos del 10 % de
-  las últimas 40 sugerencias, deja de sugerir ahí 24 h y te avisa. El modo manual sigue.
+  las últimas 40 sugerencias, deja de sugerir ahí 24 h y te avisa. El modo manual sigue. «En mitad de línea»
+  es un contexto propio: si ahí no te sirve, se silencia solo.
 - **Aviso de velocidad**: si la latencia mediana del día supera 1,5 s, propone el modo manual o reducir el contexto.
 
 *ghostline: Borrar lo aprendido en este proyecto* lo elimina todo.
@@ -82,6 +87,7 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 | `ghostline.triggerMode` | `"auto"` | `auto` \| `manual` |
 | `ghostline.debounceMs` | `600` | Pausa al teclear para que se pida una sugerencia. |
 | `ghostline.speculation` | `"off"` | `line`: se adelanta en cada línea nueva y no espera tras aceptar (−23 % de espera, ~1,9x tokens). |
+| `ghostline.midLine` | `true` | Sugerir también en mitad de una línea, justo donde acabas de teclear. `false`: solo al final de la línea (menos peticiones). |
 | `ghostline.eagerDebounceMs` | `120` | Espera corta en una línea vacía con `speculation: line`. |
 | `ghostline.maxLines` | `6` | |
 | `ghostline.requestTimeoutMs` | `8000` | |

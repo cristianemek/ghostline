@@ -111,6 +111,45 @@ async function run() {
     assert.equal(api.today().requests, 2);
   });
 
+  await step('auto: en mitad de una línea solo dispara justo donde se acaba de teclear, y se puede apagar', async () => {
+    // "  return result;" → "  return x, result;" typed one character at a time, as a keyboard would.
+    const type = async (line, character, text) => {
+      for (const [index, char] of [...text].entries()) {
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(sample.uri, new vscode.Position(line, character + index), char);
+        await vscode.workspace.applyEdit(edit);
+      }
+      await sleep(50);
+    };
+    const before = api.today().requests;
+    await type(6, 9, 'x, ');
+    // Somewhere else on the line, or inside a word: nothing.
+    assert.equal(await ask(sample, 6, 2), undefined);
+    assert.equal(await ask(sample, 6, 14), undefined);
+    assert.equal(api.today().requests, before);
+    await setting('midLine', false);
+    assert.equal(await ask(sample, 6, 12), undefined);
+    assert.equal(api.today().requests, before);
+    await setting('midLine', true);
+    const items = await ask(sample, 6, 12);
+    assert.equal(items?.length, 1);
+    assert.equal(items[0].insertText, 'a + b;');
+    assert.equal(api.today().requests, before + 1);
+    assert.ok(api.logLines().some((line) => line.includes(' typescript mid-line ')), 'falta el contexto mid-line en el log');
+    // A paste is not typing.
+    const paste = new vscode.WorkspaceEdit();
+    paste.insert(sample.uri, new vscode.Position(10, 8), 'value, other, ');
+    await vscode.workspace.applyEdit(paste);
+    await sleep(50);
+    assert.equal(await ask(sample, 10, 22), undefined);
+    assert.equal(api.today().requests, before + 1);
+    // Leave the file as it was for the steps that follow.
+    const undo = new vscode.WorkspaceEdit();
+    undo.delete(sample.uri, new vscode.Range(10, 8, 10, 22));
+    undo.delete(sample.uri, new vscode.Range(6, 9, 6, 12));
+    await vscode.workspace.applyEdit(undo);
+  });
+
   await step('exclusiones: .env.local nunca genera una petición, ni en auto ni en manual', async () => {
     const secret = await open('.env.local');
     const before = api.today().requests;
@@ -145,7 +184,7 @@ async function run() {
   });
 
   await step('barra de estado: peticiones · tokens · % de aceptadas', async () => {
-    assert.match(api.statusText(), /^ghostline 4 · [\d.]+k? tok · \d+% ✓$/);
+    assert.match(api.statusText(), /^ghostline 5 · [\d.]+k? tok · \d+% ✓$/);
   });
 
   await step('límite diario: pausa el modo auto, lo indica y el manual sigue funcionando', async () => {
