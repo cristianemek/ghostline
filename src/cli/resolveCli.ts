@@ -39,13 +39,21 @@ export function resolveNpmShim(shimPath: string, environment: ResolveEnvironment
     // Unreadable shim: fall through to the conventional location.
   }
   candidates.push(path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'));
-  return candidates.find((candidate) => environment.isFile(candidate)) ?? null;
+  // Whatever the shim says, the only thing ghostline will launch through it is a claude.exe.
+  return (
+    candidates.find((candidate) => path.basename(candidate).toLowerCase() === 'claude.exe' && environment.isFile(candidate)) ?? null
+  );
 }
 
 function resolveWindows(environment: ResolveEnvironment): ResolveResult {
   const path = nodePath.win32;
   const { env } = environment;
-  const dirs = (env.PATH ?? env.Path ?? '').split(';').map((dir) => dir.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  const dirs = (env.PATH ?? env.Path ?? '')
+    .split(';')
+    .map((dir) => dir.trim().replace(/^"|"$/g, ''))
+    // A relative entry ("." or "bin") would resolve against whatever folder the editor runs in,
+    // which lets a repository plant its own claude.exe.
+    .filter((dir) => dir !== '' && path.isAbsolute(dir));
   const extensions = (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
     .split(';')
     .map((ext) => ext.trim().toLowerCase())
@@ -81,7 +89,7 @@ function resolveWindows(environment: ResolveEnvironment): ResolveResult {
 
 function resolvePosix(environment: ResolveEnvironment): ResolveResult {
   const path = nodePath.posix;
-  const dirs = (environment.env.PATH ?? '').split(':').filter(Boolean);
+  const dirs = (environment.env.PATH ?? '').split(':').filter((dir) => dir !== '' && path.isAbsolute(dir));
   for (const dir of dirs) {
     const candidate = path.join(dir, 'claude');
     if (environment.isFile(candidate)) return { ok: true, command: candidate, source: 'path' };

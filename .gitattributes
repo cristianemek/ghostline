@@ -1,0 +1,4 @@
+# The system prompts are sent to the CLI byte for byte and the fixtures are compared as text:
+# keep LF everywhere, whatever core.autocrlf says.
+* text=auto eol=lf
+*.vsix binary

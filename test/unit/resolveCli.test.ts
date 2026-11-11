@@ -90,6 +90,20 @@ test('windows: the native installer location is found even when it is not on PAT
   });
 });
 
+test('relative PATH entries are never searched: a repository cannot plant its own claude', () => {
+  const planted = windows({ 'claude.exe': '', 'bin\\claude.exe': '', '.\\claude.exe': '' }, { PATH: '.;bin;;C:\\real' });
+  assert.equal(resolveCli('', planted).ok, false);
+  const real = windows({ 'claude.exe': '', 'C:\\real\\claude.exe': '' }, { PATH: '.;C:\\real' });
+  assert.deepEqual(resolveCli('', real), { ok: true, command: 'C:\\real\\claude.exe', source: 'path' });
+  assert.equal(resolveCli('', posix(['claude', './claude', 'bin/claude'], { PATH: '.:bin:' })).ok, false);
+});
+
+test('windows: a shim is only followed to a file called claude.exe', () => {
+  const shim = '@ECHO off\r\n"%dp0%\\..\\tools\\installer.exe" %*';
+  const result = resolveCli('', windows({ 'C:\\npm\\claude.cmd': shim, 'C:\\tools\\installer.exe': '' }, { PATH: 'C:\\npm' }));
+  assert.equal(result.ok, false);
+});
+
 test('windows: nothing found', () => {
   const result = resolveCli('', windows({}, { PATH: 'C:\\a;C:\\b' }));
   assert.ok(!result.ok);

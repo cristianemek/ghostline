@@ -60,7 +60,28 @@ export function extractSignature(lines: readonly string[], line: number): string
   }
   // The body is of no use here: keep what comes before it.
   signature = signature.replace(/\s*\{\s*$/, '').replace(/\s*=>\s*\{?\s*$/, ' =>').replace(/\s+/g, ' ').trim();
+  signature = withoutValues(signature);
   return signature.length > MAX_SIGNATURE_CHARS ? signature.slice(0, MAX_SIGNATURE_CHARS - 1) + '…' : signature;
+}
+
+const LITERAL_START = /^\s*(["'`\d[{-]|(?:true|false|null|none|nil|undefined)\b)/i;
+
+/**
+ * A declaration is sent for its shape, never for its contents: `const API_KEY = "sk-…"` in a file
+ * that no exclusion pattern covers must not travel as a "signature". Literal initialisers are
+ * dropped and any long string literal that remains (a default argument, say) is blanked.
+ */
+function withoutValues(signature: string): string {
+  let result = signature;
+  const paren = result.indexOf('(');
+  const head = paren < 0 ? result : result.slice(0, paren);
+  // The first plain "=" before any parenthesis: an assignment, not ==, =>, <=, >= or !=.
+  const assignment = /(?<![=!<>])=(?![=>])/.exec(head);
+  if (assignment) {
+    const value = result.slice(assignment.index + 1);
+    if (value.trim() === '' || LITERAL_START.test(value)) result = result.slice(0, assignment.index).trimEnd();
+  }
+  return result.replace(/(["'`])(?:\\.|(?!\1)[^\\]){9,}\1/g, '$1…$1');
 }
 
 export interface ResolvedSymbol {

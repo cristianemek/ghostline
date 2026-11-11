@@ -37,7 +37,22 @@ test('signature: one line, without the body', () => {
   assert.equal(extractSignature(['const add = (a: number, b: number) => {'], 0), 'const add = (a: number, b: number) =>');
   assert.equal(extractSignature(['def compute_total(items, tax_rate=0.21):'], 0), 'def compute_total(items, tax_rate=0.21):');
   assert.equal(extractSignature(['export interface Order {'], 0), 'export interface Order');
-  assert.equal(extractSignature(['const MAX = 3;'], 0), 'const MAX = 3;');
+  assert.equal(extractSignature(['const MAX = 3;'], 0), 'const MAX');
+});
+
+test('signature: values never travel, only the shape of the declaration', () => {
+  // A secret in a file that no exclusion pattern covers.
+  assert.equal(extractSignature(['export const API_KEY = "sk-live-0123456789abcdef0123456789";'], 0), 'export const API_KEY');
+  assert.equal(extractSignature(["DB_PASSWORD = 'hunter2-but-longer'"], 0), 'DB_PASSWORD');
+  assert.equal(extractSignature(['const RETRIES: number = 3;'], 0), 'const RETRIES: number');
+  assert.equal(extractSignature(['export const config = {'], 0), 'export const config');
+  assert.equal(extractSignature(['let enabled = true;'], 0), 'let enabled');
+  // Functions keep their parameters; only long string literals inside them are blanked.
+  assert.equal(extractSignature(['const add = (a: number, b: number) => {'], 0), 'const add = (a: number, b: number) =>');
+  assert.equal(extractSignature(['export const handler = async (event: Event) => {'], 0), 'export const handler = async (event: Event) =>');
+  assert.equal(extractSignature(['def connect(host, token="ghp_abcdefghijklmnopqrstuvwxyz0123456789"):'], 0), 'def connect(host, token="…"):');
+  assert.equal(extractSignature(["function greet(name = 'World') {"], 0), "function greet(name = 'World')");
+  assert.equal(extractSignature(['const client = createClient(process.env.URL, "a-very-long-inline-token-value");'], 0), 'const client = createClient(process.env.URL, "…");');
 });
 
 test('signature: parameters spread over several lines are joined', () => {

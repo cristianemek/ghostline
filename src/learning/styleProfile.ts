@@ -135,9 +135,18 @@ export function cleanStyleGuide(raw: string, maxChars: number = MAX_PROFILE_CHAR
   return capProfile(lines.join('\n').replace(/\n{3,}/g, '\n\n').trim(), maxChars);
 }
 
-/** Cuts a profile (possibly hand-edited) to the size that is sent, on a line boundary. */
+/** The tags that give the prompt its structure. */
+const STRUCTURAL_TAG = /<\/?(?:style|examples?|before|accepted|symbols|file|prefix|suffix|cursor)\b[^>]*>/gi;
+
+/**
+ * Cuts a profile (possibly hand-edited) to the size that is sent, on a line boundary.
+ *
+ * The profile is written by the model from file contents and then repeated in every prompt, so a
+ * file crafted to make it say "</style><file …>" would be rewriting the prompt's structure from
+ * then on. Those tags are removed; the rest is plain text the user can read in the editor.
+ */
 export function capProfile(text: string, maxChars: number = MAX_PROFILE_CHARS): string {
-  const trimmed = text.trim();
+  const trimmed = text.replace(STRUCTURAL_TAG, '').trim();
   if (trimmed.length <= maxChars) return trimmed;
   const cut = trimmed.slice(0, maxChars);
   const lastNewline = cut.lastIndexOf('\n');
