@@ -11,7 +11,8 @@ const common = {
   bundle: true,
   platform: 'node',
   format: 'cjs',
-  target: 'node20',
+  // VS Code 1.144 (the minimum in package.json) runs extensions on Node 24.
+  target: 'node24',
   external: ['vscode'],
   logLevel: 'info',
 };
