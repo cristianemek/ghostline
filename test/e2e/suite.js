@@ -405,15 +405,19 @@ async function run() {
       // The first answer ("a + b;") is useless after "zzz"; a second request answers for the new position.
       assert.equal(items?.[0]?.insertText, 'a + b;');
       assert.equal(api.today().requests, before + 2);
-      // A cursor that moves elsewhere drops whatever is in the air.
+      // A cursor that moves elsewhere drops whatever is in the air. The request had already been sent
+      // and the CLI reports nothing for it: its tokens are kept apart as an estimate, not counted as free.
+      const unconfirmed = api.today().unconfirmedTokens;
       const moved = askCancellable(flight, 11, endOf(flight, 11));
-      await sleep(50);
+      await sleep(250);
       moved.cancel();
       const editor = vscode.window.activeTextEditor;
+      editor.selection = new vscode.Selection(new vscode.Position(11, endOf(flight, 11)), new vscode.Position(11, endOf(flight, 11)));
       editor.selection = new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0));
       await sleep(700);
       assert.equal(await ask(flight, 0, 0), undefined);
       assert.ok(api.logLines().some((line) => line.includes('cancelada')));
+      assert.ok(api.today().unconfirmedTokens > unconfirmed, 'la petición cortada no se anotó como sin confirmar');
     } finally {
       delete process.env.FAKE_DELAY_MS;
     }
@@ -439,7 +443,13 @@ async function run() {
       const insideLine = await timed(5);
       assert.equal(insideLine.items?.length, 1);
       assert.ok(insideLine.ms >= 580, `dentro de la línea: ${insideLine.ms} ms`);
-      // An empty line gets the short wait: one bet per new line.
+      // By default nothing is anticipated: an empty line waits like any other place.
+      const emptyByDefault = await timed(12);
+      assert.equal(emptyByDefault.items?.length, 1);
+      assert.ok(emptyByDefault.ms >= 580, `línea vacía, por defecto: ${emptyByDefault.ms} ms`);
+      api.provider.clearCache();
+      // With "line", an empty line gets the short wait: one bet per new line.
+      await setting('speculation', 'line');
       const emptyLine = await timed(12);
       assert.equal(emptyLine.items?.length, 1);
       assert.ok(emptyLine.ms >= 110 && emptyLine.ms < 520, `línea vacía: ${emptyLine.ms} ms`);

@@ -40,8 +40,8 @@ const BEFORE_LINES = 6;
 const TAIL_CHARS = 200;
 /** The provider call caused by accepting a suggestion arrives within this time. */
 const AFTER_ACCEPT_MS = 400;
-/** How long someone who joined a flight waits for its first words before giving up on it. */
-const ADOPTION_PATIENCE_MS = 1000;
+/** A request cancelled later than this after being sent has, in all likelihood, reached the API. */
+const SENT_TO_API_MS = 150;
 /** How long a programmatic refresh may take to reach the provider. */
 const REFRESH_WINDOW_MS = 1000;
 
@@ -102,7 +102,6 @@ interface Arrival {
 interface Flight {
   documentKey: string;
   documentVersion: number;
-  startedAt: number;
   anchor: number;
   tail: string;
   lineWasBlank: boolean;
@@ -419,7 +418,6 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     const launched: Flight = {
       documentKey,
       documentVersion: document.version,
-      startedAt: Date.now(),
       anchor: offset,
       tail: read(Math.max(0, offset - TAIL_CHARS), offset),
       lineWasBlank: linePrefix.trim() === '',
@@ -534,35 +532,30 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     const cancelled = new Promise<'cancelled'>((resolve) => {
       subscription = token.onCancellationRequested(() => {
         // Stop counting as a waiter right away, so the answer is kept if it lands a moment later.
+        // The request itself goes on: once it has reached the model its input is paid for, and
+        // killing it at the next keystroke only throws the answer away.
         flight.waiting--;
-        // Without speculation the original rule applies: the next keystroke kills the request.
-        if (this.deps.getConfig().speculation === 'off' && this.flight === flight) this.abortFlight();
         resolve('cancelled');
       });
     });
     // Someone who joined a flight started for an earlier cursor position checks each new piece of
     // the answer against what was typed since, and leaves as soon as they disagree.
+    // A flight that stays silent is one where the model stopped to think. It is not abandoned for
+    // that: in real use a one-second limit killed requests just before they answered (the first
+    // token took ~1.1 s there), and the answers that come after thinking are the ones most often right.
     let listener: (() => void) | undefined;
-    let patience: NodeJS.Timeout | undefined;
     const diverged = new Promise<'diverged'>((resolve) => {
       if (!stillFits) return;
       listener = () => {
         if (!stillFits()) resolve('diverged');
       };
       flight.onPartial.add(listener);
-      // A flight that has said nothing a second after take-off is one where the model stopped to
-      // think: its answer is two or three seconds away. Measured: waiting for one and then finding
-      // it did not match cost 3.7 s. Better to let it go and ask afresh.
-      patience = setTimeout(() => {
-        if (flight.partial === '') resolve('diverged');
-      }, Math.max(0, ADOPTION_PATIENCE_MS - (Date.now() - flight.startedAt)));
     });
     try {
       return await Promise.race([flight.done, cancelled, diverged]);
     } finally {
       subscription?.dispose();
       if (listener) flight.onPartial.delete(listener);
-      if (patience) clearTimeout(patience);
     }
   }
 
@@ -630,6 +623,12 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       costUsd: outcome.costUsd,
       totalMs: outcome.totalMs,
     });
+    // Cut off before the model said anything: the CLI never got to report usage, but the request
+    // had been sent. Whether it is billed is not visible from here, so it is kept apart as an
+    // estimate instead of being counted as free.
+    if (outcome.status !== 'ok' && outcome.usage.inputTokens === 0 && outcome.totalMs > SENT_TO_API_MS) {
+      deps.usage.recordUnconfirmed(deps.estimator.estimateTotal(promptChars));
+    }
     // Only clean single-round requests teach the estimator: a CLI retry doubles the input tokens.
     if (outcome.status === 'ok' && !outcome.usagePartial && outcome.numTurns <= 1) {
       deps.estimator.observe(promptChars, totalInputTokens(outcome.usage));

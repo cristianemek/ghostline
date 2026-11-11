@@ -59,7 +59,7 @@ tiempo desde la última tecla hasta que hay sugerencia.
 | `ghostline.speculation` | Espera mediana | Mejor caso | Tokens de entrada por línea |
 |---|---|---|---|
 | `off` (comportamiento original) | 1.666 ms | 1.289 ms | 1.908 |
-| **`line`** (por defecto) | **1.281 ms** | **0 ms** (ya en pantalla) | 3.565 |
+| `line` | **1.281 ms** | **0 ms** (ya en pantalla) | 3.565 |
 
 Una tanda anterior, con otra latencia de la API ese rato, dio 1.270 → 912 ms. En ambas: **un 23–28 % menos de
 espera mediana, y entre una y tres de cada ocho líneas con la sugerencia ya puesta o en medio segundo, a
@@ -70,8 +70,13 @@ lo estable es el patrón: cuando la apuesta acierta, la espera desaparece; cuand
 
 ## Qué elegir
 
-- **Menos espera** (por defecto): `"ghostline.speculation": "line"`.
-- **Menos tokens**: `"ghostline.speculation": "off"`. Es exactamente el comportamiento de la v0.4.
+- **Menos tokens** (por defecto desde la v0.6.0): `"ghostline.speculation": "off"`.
+- **Menos espera**: `"ghostline.speculation": "line"`.
+
+Desde la v0.6.0 la prioridad es el resultado y el consumo, no la latencia: el modelo razona cuando quiere
+(`reasoning: adaptive`, ver `docs/acierto.md`), la pausa por defecto es de 600 ms y ya no se abandona una
+petición por tardar. La regla de 1 s de paciencia que se describe arriba mataba, en uso real, peticiones a
+punto de responder (ver `docs/consumo.md`) y se ha eliminado.
 - `ghostline.debounceMs` (350) sigue mandando dentro de la línea: bajarlo a 200 resta 150 ms a cada
   sugerencia nueva y lanza más peticiones. `ghostline.eagerDebounceMs` (120) es la espera en línea vacía.
 - El modo manual (`Alt+\`) no tiene espera: es petición directa, ~0,85 s.

@@ -25,6 +25,11 @@ export interface DayStats {
   cancelled: number;
   /** Suggestions served without a request: cache hits and typeahead. */
   localHits: number;
+  /**
+   * Estimated input tokens of requests that were cut off after being sent but before the model
+   * answered. The CLI reports no usage for them, so whether they were billed is unknown.
+   */
+  unconfirmedTokens: number;
   /** Total latency of each successful request, in ms. Kept only for recent days. */
   latencies: number[];
   /** Total input tokens of each successful request, for the median. */
@@ -65,6 +70,7 @@ const COUNTERS = [
   'timeouts',
   'cancelled',
   'localHits',
+  'unconfirmedTokens',
 ] as const;
 
 export function emptyDay(date: string): DayStats {
@@ -83,6 +89,7 @@ export function emptyDay(date: string): DayStats {
     timeouts: 0,
     cancelled: 0,
     localHits: 0,
+    unconfirmedTokens: 0,
     latencies: [],
     inputSamples: [],
   };
@@ -180,6 +187,12 @@ export class UsageTracker {
 
   recordAccepted(): void {
     this.pendingToday().accepted++;
+    this.dirty = true;
+  }
+
+  /** A request that reached the API but was cut off before any usage was reported. */
+  recordUnconfirmed(estimatedInputTokens: number): void {
+    this.pendingToday().unconfirmedTokens += Math.max(0, Math.round(estimatedInputTokens));
     this.dirty = true;
   }
 

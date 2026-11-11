@@ -99,6 +99,12 @@ export function tooltipLines(day: DayStats, latency: LatencyStats, medianInput: 
       `razonamiento ${formatTokens(day.thinkingTokens)} · caché ${formatTokens(day.cacheReadTokens)} leídos / ` +
       `${formatTokens(day.cacheWriteTokens)} escritos`,
   );
+  if (day.unconfirmedTokens > 0) {
+    lines.push(
+      `Sin confirmar: ~${formatTokens(day.unconfirmedTokens)} tokens de peticiones cortadas antes de que el modelo respondiera ` +
+        '(la CLI no informa de si se cobran)',
+    );
+  }
   lines.push(`Entrada por petición (mediana): ${medianInput === undefined ? '–' : formatTokens(medianInput)} tokens`);
   lines.push(`Sugerencias: ${day.shown} mostradas · ${day.accepted} aceptadas (${percent(acceptanceRate(day))})`);
   lines.push(`Latencia: p50 ${ms(latency.p50)} · p95 ${ms(latency.p95)}`);

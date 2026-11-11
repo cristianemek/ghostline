@@ -7,9 +7,10 @@ export type PromptCacheMode = 'auto' | 'on' | 'off';
 export type ReasoningMode = 'minimal' | 'adaptive';
 /**
  * How much ghostline bets on a suggestion being wanted before the user has clearly paused.
- * off: never (fewest tokens). line: once per new line, and a request in the air survives the next
- * keystrokes while they agree with its answer. A third level that also bet inside the line was
- * measured and dropped: more tokens, no gain.
+ * off: never; a request is only sent after a full pause. line: one bet per new line (short wait on
+ * an empty line) and no wait right after accepting. A third level that also bet inside the line was
+ * measured and dropped: more tokens, no gain. Either way a request that is already in the air is
+ * kept while the typing agrees with its answer: it has been paid for.
  */
 export type Speculation = 'off' | 'line';
 
@@ -85,7 +86,7 @@ export function readConfig(): GhostlineConfig {
   const workspace = (name: string): unknown[] => settings.workspace(name);
 
   const model = String(user('model') ?? '').trim();
-  const debounceMs = number(user('debounceMs'), 350);
+  const debounceMs = number(user('debounceMs'), 600);
   const eagerDebounceMs = number(user('eagerDebounceMs'), 120);
   const maxLines = Math.floor(number(user('maxLines'), 6, 1));
   const prefixLines = Math.floor(number(user('context.prefixLines'), 60, 1));
@@ -123,8 +124,8 @@ export function readConfig(): GhostlineConfig {
     workerMode: oneOf(user('workerMode'), ['single-use', 'persistent'] as const, 'single-use'),
     recycleEvery: Math.floor(number(user('recycleEvery'), 8, 1)),
     promptCache: oneOf(user('promptCache'), ['auto', 'on', 'off'] as const, 'auto'),
-    reasoning: oneOf(user('reasoning'), ['minimal', 'adaptive'] as const, 'minimal'),
-    speculation: oneOf(user('speculation'), ['off', 'line'] as const, 'line'),
+    reasoning: oneOf(user('reasoning'), ['minimal', 'adaptive'] as const, 'adaptive'),
+    speculation: oneOf(user('speculation'), ['off', 'line'] as const, 'off'),
     prefixLines: Math.min(prefixLines, ...workspace('context.prefixLines').map((value) => Math.floor(number(value, prefixLines, 1)))),
     suffixLines: Math.min(suffixLines, ...workspace('context.suffixLines').map((value) => Math.floor(number(value, suffixLines)))),
     symbolContext: user('context.symbols') === true,

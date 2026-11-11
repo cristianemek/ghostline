@@ -3,7 +3,8 @@
 Autocompletado inline para VS Code (texto fantasma, `Tab` para aceptar) generado por Claude a través de la
 **CLI oficial de Claude Code** (`claude -p`), con tu suscripción y **sin API key**.
 
-Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baja, calidad, seguridad.
+Uso personal. Prioridades desde la v0.6: gasto mínimo de tokens, calidad de las sugerencias, seguridad, y la
+latencia después (la spec original ponía la latencia por delante de la calidad).
 
 - Especificación: [`docs/SPEC.md`](docs/SPEC.md)
 - Verificación de la CLI y medidas iniciales: [`docs/paso-0.md`](docs/paso-0.md)
@@ -12,6 +13,7 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 - Auditoría de seguridad y robustez: [`docs/auditoria.md`](docs/auditoria.md)
 - Cuánto acierta y cómo se mide: [`docs/acierto.md`](docs/acierto.md)
 - Latencia, qué la limita y qué se hizo: [`docs/latencia.md`](docs/latencia.md)
+- Consumo en uso real y cómo gastar menos: [`docs/consumo.md`](docs/consumo.md)
 
 ## Requisitos
 
@@ -25,7 +27,7 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.5.0.vsix
+code --install-extension ghostline-0.6.0.vsix
 ```
 
 ## Uso
@@ -74,13 +76,13 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 |---|---|---|
 | `ghostline.enabled` | `true` | |
 | `ghostline.cliPath` | `""` | Vacío: busca `claude` en `PATH`. |
-| `ghostline.model` | `"haiku"` | |
+| `ghostline.model` | `"haiku"` | `sonnet` acierta algo más (15 frente a 13 de 24) y cuesta ~15 veces más. |
 | `ghostline.effort` | `"low"` | |
-| `ghostline.reasoning` | `"minimal"` | `adaptive` deja razonar al modelo: p50 ~1,6 s y +13 % de coste, sin mejora medible. |
+| `ghostline.reasoning` | `"adaptive"` | El modelo decide cuándo razonar: ~52 % de líneas idénticas frente a ~32 % con `minimal`, que es más rápido. |
 | `ghostline.triggerMode` | `"auto"` | `auto` \| `manual` |
-| `ghostline.debounceMs` | `350` | Espera dentro de la línea. |
-| `ghostline.speculation` | `"line"` | `line`: se adelanta en cada línea nueva y reaprovecha la petición en curso (−23 % de espera, ~1,9x tokens). `off`: nunca se adelanta. |
-| `ghostline.eagerDebounceMs` | `120` | Espera corta en una línea vacía. |
+| `ghostline.debounceMs` | `600` | Pausa al teclear para que se pida una sugerencia. |
+| `ghostline.speculation` | `"off"` | `line`: se adelanta en cada línea nueva y no espera tras aceptar (−23 % de espera, ~1,9x tokens). |
+| `ghostline.eagerDebounceMs` | `120` | Espera corta en una línea vacía con `speculation: line`. |
 | `ghostline.maxLines` | `6` | |
 | `ghostline.requestTimeoutMs` | `8000` | |
 | `ghostline.dailyRequestLimit` | `1500` | 0 = sin límite. |

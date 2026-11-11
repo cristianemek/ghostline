@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "publisher": "cristianemek",
   "license": "UNLICENSED",
@@ -95,7 +95,7 @@
         "ghostline.model": {
           "type": "string",
           "default": "haiku",
-          "description": "Modelo que se pasa a la CLI con --model.",
+          "description": "Modelo que se pasa a la CLI con --model. Medido: sonnet acierta algo más que haiku (15 frente a 13 de 24) y cuesta unas 15 veces más por petición.",
           "scope": "application"
         },
         "ghostline.effort": {
@@ -118,11 +118,11 @@
             "adaptive"
           ],
           "enumDescriptions": [
-            "Se pide al modelo que responda directamente. Medido: la mitad de tokens de razonamiento y p50 de ~0,9 s.",
-            "El modelo decide cuándo razonar. Acierta más, pero una petición con razonamiento cuesta ~2x y tarda 2-3 s."
+            "Se pide al modelo que responda sin razonar. Más rápido (p95 ~1,8 s) y un 17 % más barato por petición, pero acierta bastante menos: ~32 % de líneas idénticas en las pruebas.",
+            "El modelo decide cuándo razonar. Acierta más (~52 % de líneas idénticas) y sale más barato por sugerencia buena; una de cada cuatro peticiones tarda 2-3 s."
           ],
-          "default": "minimal",
-          "description": "Cuánto razona el modelo antes de sugerir. Haiku 5.5 razona de forma adaptativa incluso con effort low y no se puede desactivar del todo.",
+          "default": "adaptive",
+          "description": "Si el modelo puede razonar antes de sugerir. Medidas en docs/acierto.md.",
           "scope": "application"
         },
         "ghostline.triggerMode": {
@@ -140,9 +140,9 @@
         },
         "ghostline.debounceMs": {
           "type": "number",
-          "default": 350,
+          "default": 600,
           "minimum": 0,
-          "description": "Espera, en milisegundos, tras dejar de teclear en mitad de una palabra antes de pedir una sugerencia. Justo después de aceptar una sugerencia no se espera. Si un área de trabajo indica otro valor, se usa el mayor."
+          "description": "Pausa, en milisegundos, que hay que hacer al teclear para que se pida una sugerencia. Más corta = sugerencias antes y más peticiones que se quedan sin usar. Si un área de trabajo indica otro valor, se usa el mayor."
         },
         "ghostline.speculation": {
           "type": "string",
@@ -151,12 +151,12 @@
             "line"
           ],
           "enumDescriptions": [
-            "Nunca se adelanta: espera siempre ghostline.debounceMs y la siguiente tecla cancela la petición en curso. Es lo que menos tokens gasta.",
-            "Se adelanta una vez por línea nueva (espera corta en una línea vacía), no espera tras aceptar una sugerencia y mantiene viva la petición mientras lo que tecleas coincide con lo que responde. Medido: ~23 % menos de espera mediana y ~1,9x tokens."
+            "No se adelanta: solo pide tras una pausa completa (ghostline.debounceMs). Es lo que menos tokens gasta.",
+            "Se adelanta una vez por línea nueva (espera corta en una línea vacía) y no espera tras aceptar una sugerencia. Medido: ~23 % menos de espera mediana y ~1,9x tokens."
           ],
-          "default": "line",
+          "default": "off",
           "scope": "application",
-          "description": "Si ghostline se adelanta a tu pausa para que la sugerencia esté antes. Menos espera a cambio de más tokens (medidas en docs/latencia.md)."
+          "description": "Si ghostline se adelanta a tu pausa para que la sugerencia esté antes. En ambos casos, una petición ya enviada se aprovecha mientras lo que tecleas coincide con lo que responde."
         },
         "ghostline.eagerDebounceMs": {
           "type": "number",

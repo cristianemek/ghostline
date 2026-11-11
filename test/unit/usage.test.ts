@@ -88,6 +88,22 @@ test('tracker: counts requests, tokens, outcomes and latencies per day', () => {
   assert.equal(tracker.medianInputTokens(), 1502);
 });
 
+test('tracker: tokens of requests cut off before answering are kept apart, not counted as free or as spent', async () => {
+  const store = memoryStore();
+  const tracker = new UsageTracker(store, clock('2026-11-11T10:00:00').now);
+  tracker.recordRequest({ status: 'cancelled', usage: usage(0, 0), costUsd: 0, totalMs: 900 });
+  tracker.recordUnconfirmed(1830.4);
+  tracker.recordUnconfirmed(-5);
+  assert.equal(tracker.today().unconfirmedTokens, 1830);
+  assert.equal(tracker.today().inputTokens, 0);
+  assert.equal(totalTokens(tracker.today()), 0);
+  await tracker.flush();
+  assert.equal(new UsageTracker(store, clock('2026-11-11T10:00:00').now).today().unconfirmedTokens, 1830);
+  // Days stored before this counter existed read as zero.
+  store.data.set('ghostline.usage.v1', [{ date: '2026-11-11', requests: 3 }]);
+  assert.equal(new UsageTracker(store, clock('2026-11-11T10:00:00').now).today().unconfirmedTokens, 0);
+});
+
 test('tracker: acceptance rate is undefined until something was shown', () => {
   const tracker = new UsageTracker(memoryStore());
   assert.equal(acceptanceRate(tracker.today()), undefined);
