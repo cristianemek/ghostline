@@ -65,6 +65,29 @@ fs.writeFileSync(
     '',
   ].join('\n'),
 );
+// Phase 3: a symbol defined in another file, and one defined in a file that is excluded.
+fs.writeFileSync(
+  path.join(workspace, 'src', 'lib.ts'),
+  'export function computeTotal(items: number[], taxRate: number): number {\n  return items.reduce((sum, item) => sum + item, 0) * (1 + taxRate);\n}\n',
+);
+fs.writeFileSync(
+  path.join(workspace, 'src', 'secretStore.ts'),
+  'export function loadSecretKey(vaultName: string): string {\n  return vaultName;\n}\n',
+);
+fs.writeFileSync(
+  path.join(workspace, 'src', 'usesLib.ts'),
+  [
+    "import { computeTotal } from './lib';",
+    "import { loadSecretKey } from './secretStore';",
+    '',
+    'export function report(values: number[]): number {',
+    '  const total = computeTotal(',
+    '  const key = loadSecretKey(',
+    '  return total;',
+    '}',
+    '',
+  ].join('\n'),
+);
 fs.writeFileSync(
   path.join(workspace, 'src', 'many.js'),
   Array.from({ length: 60 }, (_, i) => `const value${i} = ${i};`).join('\n') + '\n',

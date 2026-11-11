@@ -7,7 +7,8 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 
 - Especificación: [`docs/SPEC.md`](docs/SPEC.md)
 - Verificación de la CLI y medidas iniciales: [`docs/paso-0.md`](docs/paso-0.md)
-- Cifras y decisiones de cada fase: [`docs/fase-1.md`](docs/fase-1.md), [`docs/fase-2.md`](docs/fase-2.md)
+- Cifras y decisiones de cada fase: [`docs/fase-1.md`](docs/fase-1.md), [`docs/fase-2.md`](docs/fase-2.md),
+  [`docs/fase-3.md`](docs/fase-3.md)
 
 ## Requisitos
 
@@ -21,7 +22,7 @@ Uso personal. Prioridades, por este orden: gasto mínimo de tokens, latencia baj
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.2.0.vsix
+code --install-extension ghostline-0.3.0.vsix
 ```
 
 ## Uso
@@ -85,13 +86,17 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 | `ghostline.promptCache` | `"auto"` | `auto`: off en `single-use`, on en `persistent`. |
 | `ghostline.context.prefixLines` | `60` | |
 | `ghostline.context.suffixLines` | `20` | |
+| `ghostline.context.symbols` | `false` | Firma de hasta 3 símbolos de la línea, vía servidor de lenguaje. |
 | `ghostline.learning.examples` | `true` | Guardar y enviar ejemplos de lo aceptado. |
 | `ghostline.learning.adaptiveTrigger` | `true` | Silenciar 24 h los contextos donde casi nunca aceptas. |
 | `ghostline.debug.logPrompts` | `false` | |
 
 ## Privacidad y seguridad
 
-- Solo se envía contexto del **documento actual**: hasta 60 líneas antes y 20 después del cursor.
+- Solo se envía contexto del **documento actual**: hasta 60 líneas antes y 20 después del cursor. Dos
+  excepciones, ambas bajo tu control: el comando de aprender el estilo (envía el principio de los archivos que
+  confirmas) y `ghostline.context.symbols`, desactivado por defecto (envía la línea de firma de símbolos
+  definidos en otros archivos; con ella el modelo deja de inventarse los argumentos de una llamada).
 - **Archivos excluidos**: nunca se sugiere en ellos (tampoco en manual), nunca se envían y nunca se guarda nada de ellos.
   Por defecto: `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `*secret*`,
   `*credential*`, `.npmrc`, `.pypirc`, `.netrc`, `.aws/**`, `.ssh/**`, `*.kdbx`.

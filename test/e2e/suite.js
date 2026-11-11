@@ -231,6 +231,59 @@ async function run() {
     assert.equal((await ask(sampleAgain, 2, endOf(sampleAgain, 2)))?.length, 1);
   });
 
+  // --- Fase 3 -----------------------------------------------------------------------------------
+
+  await step('símbolos: la firma de una definición de otro archivo llega al prompt; de un archivo excluido, nunca', async () => {
+    await setting('context.symbols', true);
+    await setting('debug.logPrompts', true);
+    const uses = await open('src/usesLib.ts');
+    const column = uses.lineAt(4).text.indexOf('computeTotal');
+    // The TypeScript server needs a moment after the first file opens.
+    let ready = false;
+    for (let attempt = 0; attempt < 80 && !ready; attempt++) {
+      const found = await vscode.commands.executeCommand(
+        'vscode.executeDefinitionProvider',
+        uses.uri,
+        new vscode.Position(4, column + 2),
+      );
+      ready = Array.isArray(found) && found.length > 0;
+      if (!ready) await sleep(500);
+    }
+    assert.ok(ready, 'el servidor de TypeScript no resolvió la definición en 40 s');
+
+    // The lookup has 300 ms; a cold first try just leaves the answer cached for the next one.
+    let prompt = '';
+    for (let attempt = 0; attempt < 4 && !prompt.includes('<symbols>'); attempt++) {
+      api.provider.clearCache();
+      const items = await ask(uses, 4, endOf(uses, 4));
+      assert.equal(items?.length, 1);
+      prompt = lastPrompt();
+      if (!prompt.includes('<symbols>')) await sleep(400);
+    }
+    assert.ok(
+      prompt.includes('<symbols>\nexport function computeTotal(items: number[], taxRate: number): number  // src/lib.ts\n</symbols>'),
+      `símbolos inesperados: ${prompt.slice(0, 300)}`,
+    );
+    assert.ok(prompt.indexOf('<symbols>') < prompt.indexOf('<file path='));
+
+    // Defined in src/secretStore.ts, which matches the default exclusions: its signature stays local.
+    const secretColumn = uses.lineAt(5).text.indexOf('loadSecretKey');
+    const secretDefinition = await vscode.commands.executeCommand(
+      'vscode.executeDefinitionProvider',
+      uses.uri,
+      new vscode.Position(5, secretColumn + 2),
+    );
+    assert.ok(Array.isArray(secretDefinition) && secretDefinition.length > 0, 'la definición excluida debería existir');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      api.provider.clearCache();
+      assert.equal((await ask(uses, 5, endOf(uses, 5)))?.length, 1);
+      assert.ok(!lastPrompt().includes('vaultName'), 'la firma de un archivo excluido llegó al prompt');
+      await sleep(400);
+    }
+    await setting('context.symbols', false);
+    await setting('debug.logPrompts', false);
+  });
+
   fs.writeFileSync(process.env.GHOSTLINE_E2E_RESULT, JSON.stringify({ steps }));
   const failed = steps.filter((item) => !item.ok);
   if (failed.length > 0) throw new Error(`${failed.length} comprobaciones fallidas`);
