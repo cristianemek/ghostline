@@ -29,10 +29,13 @@ async function run() {
       new vscode.CancellationTokenSource().token,
     );
   const endOf = (document, line) => document.lineAt(line).text.length;
+  // Always the user's settings: most of ghostline's settings cannot be set by a workspace at all.
   const setting = async (name, value) => {
-    await settings().update(name, value, vscode.ConfigurationTarget.Workspace);
+    await settings().update(name, value, vscode.ConfigurationTarget.Global);
     await sleep(150);
   };
+  // The suite asks for suggestions back to back; without this none would count as "seen".
+  api.provider.minVisibleMs = 0;
   const step = async (name, body) => {
     try {
       await body();
@@ -41,6 +44,24 @@ async function run() {
       steps.push({ name, ok: false, error: String(error && error.message ? error.message : error).split('\n').slice(0, 6).join(' | ') });
     }
   };
+
+  await step('seguridad: los ajustes que trae un repositorio no pueden hacer que ghostline envíe o gaste más', async () => {
+    // .vscode/settings.json of this workspace sets hostile values for all of these (see run.js).
+    const config = api.config();
+    assert.equal(config.model, 'haiku');
+    assert.equal(config.effort, 'low');
+    assert.equal(config.dailyRequestLimit, 1500);
+    assert.equal(config.logPrompts, false);
+    assert.equal(config.symbolContext, false);
+    assert.equal(config.promptCache, 'auto');
+    assert.equal(config.workerMode, 'single-use');
+    assert.equal(config.prefixLines, 60);
+    assert.equal(config.maxLines, 6);
+    // Exclusions and disabled languages add up; the defaults are still there.
+    assert.ok(config.excludePatterns.includes('**/.env.*'));
+    assert.ok(config.excludePatterns.includes('**/only-this.txt'));
+    assert.ok(config.disabledLanguages.includes('markdown'));
+  });
 
   const sample = await open('src/sample.ts');
   let firstId;
@@ -229,6 +250,63 @@ async function run() {
     // Another language is not affected.
     const sampleAgain = await open('src/sample.ts');
     assert.equal((await ask(sampleAgain, 2, endOf(sampleAgain, 2)))?.length, 1);
+  });
+
+  await step('disparo adaptativo: una sugerencia que desaparece al instante no cuenta como ignorada', async () => {
+    const seen = await open('src/seen.py');
+    const python = () => api.adaptiveReport().find((entry) => entry.languageId === 'python' && entry.context === 'end-of-line');
+    api.provider.minVisibleMs = 750;
+    try {
+      assert.equal((await ask(seen, 0, endOf(seen, 0)))?.length, 1);
+      // The next request arrives right away: the first suggestion was never really on screen.
+      assert.equal((await ask(seen, 1, endOf(seen, 1)))?.length, 1);
+      assert.equal(python()?.shown ?? 0, 0);
+      // This one stays up long enough to have been read, and is then passed over.
+      await sleep(900);
+      assert.equal((await ask(seen, 2, endOf(seen, 2)))?.length, 1);
+      assert.equal(python()?.shown, 1);
+      assert.equal(python()?.accepted, 0);
+    } finally {
+      api.provider.minVisibleMs = 0;
+    }
+  });
+
+  await step('errores repetidos: pausa las peticiones automáticas, lo indica y se recupera sola', async () => {
+    const errors = await open('src/errors.ts');
+    let line = 0;
+    const next = (context) => ask(errors, line, endOf(errors, line), context);
+    try {
+      // New CLI processes will now fail like a logged-out CLI. The one already waiting was launched
+      // before the change and still answers: use it up.
+      process.env.FAKE_MODE = 'error';
+      assert.equal((await next())?.length, 1);
+      line++;
+      let before = api.today().requests;
+      for (let i = 0; i < 3; i++, line++) assert.equal(await next(), undefined);
+      assert.equal(api.today().requests, before + 3);
+
+      // Paused: no process is launched, no request is counted.
+      before = api.today().requests;
+      assert.equal(await next(), undefined);
+      line++;
+      assert.equal(await next(), undefined);
+      assert.equal(api.today().requests, before);
+      assert.match(api.statusText(), /^\$\(warning\) ghostline /);
+      assert.ok(api.logLines().some((entry) => entry.includes('en pausa') && entry.includes('Invalid API key')));
+
+      // A manual request is never blocked…
+      assert.equal(await next(INVOKE), undefined);
+      assert.equal(api.today().requests, before + 1);
+      // …and once the CLI works again (after the broken process that was left waiting), it closes the pause.
+      process.env.FAKE_MODE = 'ok';
+      assert.equal(await next(INVOKE), undefined);
+      assert.equal((await next(INVOKE))?.length, 1);
+      line++;
+      assert.equal((await next())?.length, 1);
+      assert.doesNotMatch(api.statusText(), /^\$\(warning\)/);
+    } finally {
+      delete process.env.FAKE_MODE;
+    }
   });
 
   // --- Fase 3 -----------------------------------------------------------------------------------
