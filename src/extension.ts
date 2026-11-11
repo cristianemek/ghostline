@@ -16,6 +16,7 @@ import {
   type GhostlineConfig,
 } from './config';
 import { isPathExcluded } from './context/exclusions';
+import { createSymbolProvider } from './context/symbols';
 import { AdaptiveTrigger } from './learning/adaptiveTrigger';
 import { ExampleStore } from './learning/exampleStore';
 import { CONTEXT_LABELS, Learning } from './learning/learning';
@@ -110,6 +111,12 @@ class Ghostline implements vscode.Disposable {
       log: (line) => this.log(line),
       onActivity: () => this.queueRender(),
       learning,
+      // Phase 3, off unless "ghostline.context.symbols" is on.
+      symbols: createSymbolProvider({
+        isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns),
+        charsPerToken: () => this.estimator.charsPerToken,
+        window: () => ({ prefixLines: this.config.prefixLines, suffixLines: this.config.suffixLines }),
+      }),
     });
     void this.style.load();
 

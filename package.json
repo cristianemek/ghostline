@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "publisher": "cristianemek",
   "license": "UNLICENSED",
@@ -240,6 +240,11 @@
           "default": 20,
           "minimum": 0,
           "description": "Líneas posteriores al cursor que se envían como máximo."
+        },
+        "ghostline.context.symbols": {
+          "type": "boolean",
+          "default": false,
+          "description": "Añade al prompt la firma de hasta 3 símbolos de la línea actual, localizada con el servidor de lenguaje (definiciones fuera de lo que ya se envía; nunca de archivos excluidos). Comparte presupuesto con el contexto del archivo."
         },
         "ghostline.learning.examples": {
           "type": "boolean",
