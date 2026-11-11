@@ -3,10 +3,10 @@
  *
  *   input tokens ≈ overhead + characters / charsPerToken
  *
- * The defaults were measured in Paso 0 with claude-haiku-5-5 on TypeScript (docs/paso-0.md): the CLI
- * adds ~600 tokens to every request, the system prompt ~250 more, and code tokenizes at ~2.4
- * characters per token (not the 3.5 one would guess). Other languages and models differ, so the
- * estimate keeps adjusting itself with an exponentially weighted least-squares fit.
+ * The defaults were measured with claude-haiku-5-5 on TypeScript (docs/paso-0.md, docs/fase-1.md):
+ * the CLI adds ~600 tokens to every request, the system prompt and the prompt wrapper ~400 more, and
+ * code tokenizes at 2.4-2.9 characters per token (not the 3.5 one would guess). Other languages and
+ * models differ, so the estimate keeps adjusting itself with an exponentially weighted least-squares fit.
  */
 export interface CalibrationState {
   n: number;
@@ -16,12 +16,14 @@ export interface CalibrationState {
   sxy: number;
 }
 
-export const DEFAULT_CHARS_PER_TOKEN = 2.4;
-export const DEFAULT_OVERHEAD_TOKENS = 850;
+export const DEFAULT_CHARS_PER_TOKEN = 2.7;
+export const DEFAULT_OVERHEAD_TOKENS = 1000;
 
 const DECAY = 0.98;
 const MIN_SAMPLES_FOR_OVERHEAD = 3;
 const MIN_SAMPLES_FOR_SLOPE = 8;
+const MIN_SAMPLES_FOR_OUTLIERS = 5;
+const OUTLIER_FACTOR = 1.5;
 /** The slope is only trusted when prompt sizes actually varied (standard deviation in characters). */
 const MIN_SPREAD_CHARS = 300;
 const CHARS_PER_TOKEN_RANGE: readonly [number, number] = [1.5, 5];
@@ -48,6 +50,12 @@ export class TokenEstimator {
   observe(promptChars: number, inputTokens: number): void {
     if (!(promptChars > 0) || !(inputTokens > 0)) return;
     const s = this.state;
+    // A request far from what is expected (the CLI retried, a different model answered…) would tilt
+    // the fit for a long time: skip it once there is a baseline to compare against.
+    if (s.n >= MIN_SAMPLES_FOR_OUTLIERS) {
+      const ratio = inputTokens / this.estimateTotal(promptChars);
+      if (ratio > OUTLIER_FACTOR || ratio < 1 / OUTLIER_FACTOR) return;
+    }
     this.state = {
       n: s.n * DECAY + 1,
       sx: s.sx * DECAY + promptChars,

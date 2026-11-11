@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hasUnmatchedCloser, postprocess, stripCodeFences, type IndentStyle } from '../../src/completion/postprocess';
+import {
+  hasUnmatchedCloser,
+  postprocess,
+  shouldStopEarly,
+  stripCodeFences,
+  type IndentStyle,
+} from '../../src/completion/postprocess';
 
 const SPACES_2: IndentStyle = { insertSpaces: true, tabSize: 2 };
 const SPACES_4: IndentStyle = { insertSpaces: true, tabSize: 4 };
@@ -59,6 +65,32 @@ test('things that look like chatter but are real code survive', () => {
   // Prose is the right completion inside a comment.
   assert.equal(run('Here is where the header is parsed', '// '), 'Here is where the header is parsed');
   assert.equal(run('I cannot be null here', '  # '), 'I cannot be null here');
+});
+
+test('an explanation after the code is cut off', () => {
+  const raw =
+    'error) {\n\nThe catch block logs the spawn error and returns null. The cursor is inside the catch parameter list.';
+  assert.equal(run(raw, '    } catch ('), 'error) {');
+  // Prose instead of code: nothing to show.
+  assert.equal(run('This function already returns the right value, so nothing needs to be added here.', '  '), '');
+  assert.equal(run('return x;\nNote that the value is cached between calls. It is never recomputed.', '  '), 'return x;');
+});
+
+test('sentences are kept where sentences belong', () => {
+  const sentence = 'The parser reads the header first. Then it validates every field.';
+  // Line comment, block comment, docstring, string literal, prose documents.
+  assert.equal(run(sentence, '  // '), sentence);
+  assert.equal(run(sentence, '/**\n * Parses a file.\n * '), sentence);
+  assert.equal(run(sentence, 'def parse():\n    """\n    '), sentence);
+  assert.equal(run(sentence + '"', 'const help = "'), sentence + '"');
+  assert.equal(
+    postprocess({ raw: sentence, prefix: '# Notes\n\n', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'markdown' }),
+    sentence,
+  );
+  // English-looking code is not prose.
+  assert.equal(run('return a if b else c', '    '), 'return a if b else c');
+  assert.equal(run('SELECT name FROM users WHERE active ORDER BY name', ''), 'SELECT name FROM users WHERE active ORDER BY name');
+  assert.equal(run('for item in items if item is not None:', '    '), 'for item in items if item is not None:');
 });
 
 test('the echoed cursor marker is removed', () => {
@@ -194,6 +226,19 @@ test('maxLines', () => {
   assert.equal(run('\na();\nb();\nc();', 'x();', '', { maxLines: 2 }), '\na();\nb();');
   // No dangling blank line after truncation.
   assert.equal(run('a();\n\nb();', '', '', { maxLines: 2 }), 'a();');
+});
+
+test('early stop: long answers and answers that turn into an explanation', () => {
+  const context = { maxLines: 6, prefix: 'function f() {\n  ', languageId: 'typescript' };
+  assert.equal(shouldStopEarly('return x;', context), false);
+  assert.equal(shouldStopEarly('a();\nb();\nc();', context), false);
+  assert.equal(shouldStopEarly(Array.from({ length: 12 }, (_, i) => `line${i}();`).join('\n'), context), true);
+  assert.equal(shouldStopEarly('x'.repeat(1300), context), true);
+  // A sentence in the middle of code: stop as soon as it reads like one.
+  assert.equal(shouldStopEarly('return x;\n\nThe function returns the cached value. It', context), true);
+  assert.equal(shouldStopEarly('return x;\n\nThe function returns', context), false);
+  // …but not inside a comment.
+  assert.equal(shouldStopEarly('The function returns the cached value. It', { ...context, prefix: '  // ' }), false);
 });
 
 test('hasUnmatchedCloser', () => {

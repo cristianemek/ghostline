@@ -12,7 +12,22 @@ export interface PostprocessInput {
   suffix: string;
   maxLines: number;
   indent: IndentStyle;
+  /** Used to tell code from prose documents, where sentences are the expected completion. */
+  languageId?: string;
 }
+
+const PROSE_LANGUAGES = new Set([
+  'markdown',
+  'mdx',
+  'plaintext',
+  'latex',
+  'tex',
+  'restructuredtext',
+  'asciidoc',
+  'git-commit',
+  'scminput',
+  'html',
+]);
 
 const WORD_CHAR = /[A-Za-z0-9_$]/;
 const COMMENT_START = /^(\/\/|\/\*|\*|#|--|<!--|;|"""|''')/;
@@ -96,6 +111,38 @@ function isChatter(text: string, lineContent: string): boolean {
   // Inside a comment prose is the expected completion, so the phrase filters would be wrong there.
   if (COMMENT_START.test(lineContent)) return false;
   return CHATTER.some((pattern) => pattern.test(trimmed));
+}
+
+/** An English sentence rather than code: capitalised, mostly plain words, with sentence punctuation. */
+function looksLikeProse(line: string): boolean {
+  const trimmed = line.trim();
+  if (!/^[A-Z]/.test(trimmed) || COMMENT_START.test(trimmed)) return false;
+  if (!/[.!?:]$/.test(trimmed) && !/[.!?] [A-Z]/.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length < 6) return false;
+  const plain = words.filter((word) => /^[A-Za-z][A-Za-z'’-]*[,.:;!?]?$/.test(word)).length;
+  return plain / words.length >= 0.8;
+}
+
+/** True when the cursor sits inside a block comment or a docstring, where prose is legitimate. */
+function insideCommentBlock(prefix: string): boolean {
+  if (prefix.lastIndexOf('/*') > prefix.lastIndexOf('*/')) return true;
+  if (prefix.lastIndexOf('<!--') > prefix.lastIndexOf('-->')) return true;
+  return ((prefix.match(/"""/g)?.length ?? 0) + (prefix.match(/'''/g)?.length ?? 0)) % 2 === 1;
+}
+
+/**
+ * Now and then the model explains itself after (or instead of) the code. Everything from the first
+ * line of prose on is dropped; in a comment, a string or a prose document sentences are left alone.
+ */
+function cutAtProse(text: string, prefix: string, lineContent: string, languageId: string | undefined): string {
+  if (languageId && PROSE_LANGUAGES.has(languageId)) return text;
+  if (insideCommentBlock(prefix)) return text;
+  const lines = text.split('\n');
+  const inCommentOrString = COMMENT_START.test(lineContent) || (lineContent.match(/["'`]/g)?.length ?? 0) % 2 === 1;
+  const start = inCommentOrString ? 1 : 0;
+  const index = lines.findIndex((line, i) => i >= start && looksLikeProse(line));
+  return index < 0 ? text : lines.slice(0, index).join('\n');
 }
 
 /** True when the text closes a bracket it never opened, i.e. one that belongs to code around the cursor. */
@@ -289,6 +336,34 @@ function removeSuffixOverlap(text: string, linePrefix: string, suffix: string, t
   return text;
 }
 
+/**
+ * For a suggestion that is being continued as the user types: the editor may have inserted closing
+ * brackets or quotes since it was first shown, so the remainder is checked against the suffix again.
+ */
+export function trimAgainstSuffix(text: string, prefix: string, suffix: string, indent: IndentStyle): string {
+  return removeSuffixOverlap(text, lastLine(prefix), suffix, Math.max(1, indent.tabSize));
+}
+
+/**
+ * True once a streamed answer is clearly longer than anything that would be shown, so the request
+ * can be cut short instead of paying for output that gets thrown away. The margin covers what the
+ * post-processing may still remove (a code fence, a restated line, leading blank lines).
+ */
+export function exceedsUsefulLength(text: string, maxLines: number): boolean {
+  return text.length > Math.max(600, maxLines * 200) || text.split('\n').length > maxLines + 3;
+}
+
+/** Whether to stop reading a streamed answer: it is long enough, or it has turned into an explanation. */
+export function shouldStopEarly(
+  text: string,
+  context: { maxLines: number; prefix: string; languageId?: string },
+): boolean {
+  if (exceedsUsefulLength(text, context.maxLines)) return true;
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const kept = cutAtProse(normalized, context.prefix, lastLine(context.prefix).trim(), context.languageId);
+  return kept.length < normalized.length;
+}
+
 function limitLines(text: string, maxLines: number): string {
   const lines = text.split('\n');
   // A completion that starts on a new line spends its first (empty) slot on the current line.
@@ -310,7 +385,7 @@ export function postprocess(input: PostprocessInput): string {
   let text = input.raw.replace(/\r\n?/g, '\n');
   text = stripCodeFences(text).replace(/<cursor\s*\/>/g, '');
   if (isChatter(text, lineContent)) return '';
-  text = text.replace(/\s+$/, '');
+  text = cutAtProse(text, prefix, lineContent, input.languageId).replace(/\s+$/, '');
   if (!text.trim()) return '';
 
   if (lineContent === '') {

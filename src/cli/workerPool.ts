@@ -22,6 +22,8 @@ export interface PoolConfig {
   standbyMaxIdleMs: number;
   promptCache: boolean;
   env?: NodeJS.ProcessEnv;
+  /** Appended after the standard flags (used by the benchmark to compare CLI configurations). */
+  extraArgs?: string[];
 }
 
 export interface PoolEvents {
@@ -175,6 +177,7 @@ export class WorkerPool {
     const args = [
       ...(config.commandPrefixArgs ?? []),
       ...buildCliArgs({ model: config.model, effort: config.effort, systemPromptFile: config.systemPromptFile }),
+      ...(config.extraArgs ?? []),
     ];
     try {
       this.spawnCount++;
@@ -257,6 +260,7 @@ function cancelledOutcome(): CompletionOutcome {
     firstTokenMs: null,
     totalMs: 0,
     apiMs: null,
+    numTurns: 0,
     stoppedEarly: false,
     waitForWorkerMs: 0,
     workerAgeMs: 0,

@@ -44,6 +44,8 @@ export interface TurnResult {
   firstTokenMs: number | null;
   totalMs: number;
   apiMs: number | null;
+  /** API round trips the CLI made for this message; more than one means it retried on its own. */
+  numTurns: number;
   stoppedEarly: boolean;
 }
 
@@ -215,6 +217,7 @@ export class CliWorker {
           usage: event.usage,
           costUsd: event.costUsd,
           apiMs: event.durationApiMs,
+          numTurns: event.numTurns,
         });
         break;
       default:
@@ -237,6 +240,7 @@ export class CliWorker {
     usage?: Usage;
     costUsd?: number;
     apiMs?: number;
+    numTurns?: number;
     stoppedEarly?: boolean;
   }): void {
     const turn = this.turn;
@@ -263,6 +267,7 @@ export class CliWorker {
       firstTokenMs: turn.firstTokenAt === null ? null : turn.firstTokenAt - turn.startedAt,
       totalMs: now - turn.startedAt,
       apiMs: outcome.apiMs ?? null,
+      numTurns: outcome.numTurns ?? 0,
       stoppedEarly: outcome.stoppedEarly ?? false,
     });
   }
@@ -278,6 +283,7 @@ export class CliWorker {
       firstTokenMs: null,
       totalMs: performance.now() - startedAt,
       apiMs: null,
+      numTurns: 0,
       stoppedEarly: false,
     };
   }

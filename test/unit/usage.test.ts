@@ -182,7 +182,7 @@ test('estimator: starts from the measured defaults', () => {
   const estimator = new TokenEstimator();
   assert.equal(estimator.charsPerToken, DEFAULT_CHARS_PER_TOKEN);
   assert.equal(estimator.overheadTokens, DEFAULT_OVERHEAD_TOKENS);
-  assert.equal(estimator.estimateTotal(2400), DEFAULT_OVERHEAD_TOKENS + 1000);
+  assert.equal(estimator.estimateTotal(2400), Math.round(DEFAULT_OVERHEAD_TOKENS + 2400 / DEFAULT_CHARS_PER_TOKEN));
 });
 
 test('estimator: learns overhead and ratio from varied real usage', () => {
