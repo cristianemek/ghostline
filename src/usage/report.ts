@@ -18,6 +18,13 @@ export interface SessionInfo {
   apiKeySource?: string;
   cliError?: string;
   rateLimit?: RateLimitInfo;
+  learning?: {
+    /** Accepted completions stored for this workspace. */
+    examples: number;
+    hasProfile: boolean;
+    /** Language/context pairs muted by the adaptive trigger, already formatted. */
+    muted: string[];
+  };
 }
 
 function percent(rate: number | undefined): string {
@@ -93,6 +100,13 @@ export function tooltipLines(day: DayStats, latency: LatencyStats, medianInput: 
   if (session.rateLimit) {
     const line = rateLimitLine(session.rateLimit);
     if (line) lines.push(line);
+  }
+  if (session.learning) {
+    const { examples, hasProfile, muted } = session.learning;
+    lines.push(
+      `Aprendizaje: ${examples} ejemplos aceptados · perfil de estilo: ${hasProfile ? 'sí' : 'no'}` +
+        (muted.length > 0 ? ` · silenciado 24 h: ${muted.join(', ')}` : ''),
+    );
   }
   if (day.costUsd > 0) lines.push(`Coste equivalente en la API: ${usd(day.costUsd)}`);
   return lines;

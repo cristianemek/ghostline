@@ -9,7 +9,7 @@ import {
   type PromptLimits,
 } from '../../src/completion/promptBuilder';
 
-const LIMITS: PromptLimits = { ...DEFAULT_LIMITS, fileTargetTokens: 1000, charsPerToken: 2.4 };
+const LIMITS: PromptLimits = { ...DEFAULT_LIMITS, targetTokens: 1000, charsPerToken: 2.4 };
 
 function lines(count: number, width = 30, tag = 'line'): string {
   return Array.from({ length: count }, (_, i) => `${tag} ${String(i).padStart(4, '0')} `.padEnd(width, 'x')).join('\n');
@@ -101,8 +101,60 @@ test('file context stays within the token target: the prefix is trimmed from the
   assert.ok(built.suffix.length > 0);
 });
 
+test('the style profile is sent only when the file leaves room for it', () => {
+  const style = '- Use single quotes and semicolons.\n'.repeat(18).trim(); // ~650 characters
+  // A long file fills the budget with real code, which already shows the style: no profile.
+  const longPrefix = lines(400, 50);
+  const longSuffix = '\n' + lines(100, 50, 'after');
+  const plain = buildPrompt(input({ prefix: longPrefix, suffix: longSuffix }));
+  const long = buildPrompt(input({ prefix: longPrefix, suffix: longSuffix, styleProfile: style }));
+  assert.equal(long.styleUsed, false);
+  assert.equal(long.text, plain.text);
+  // A new or short file has little to go on: the profile goes first, and nothing is trimmed for it.
+  const shortPrefix = lines(12, 40);
+  const short = buildPrompt(input({ prefix: shortPrefix, suffix: '', styleProfile: style }));
+  assert.equal(short.styleUsed, true);
+  assert.ok(short.text.startsWith(`<style>\n${style}\n</style>\n`));
+  assert.equal(short.prefix, shortPrefix);
+  assert.ok(short.estimatedTokens <= 1000 + 40);
+  // In between: it is all or nothing, the file is never trimmed to fit the profile.
+  const medium = buildPrompt(input({ prefix: lines(40, 50), suffix: '', styleProfile: style }));
+  assert.equal(medium.styleUsed, false);
+  assert.equal(medium.prefix, lines(40, 50));
+});
+
+test('examples are paid for out of the same budget: the prefix shrinks, the total does not grow', () => {
+  const prefix = lines(400, 50);
+  const suffix = '\n' + lines(100, 50, 'after');
+  const plain = buildPrompt(input({ prefix, suffix }));
+  const examples = [{ before: lines(5, 50, 'ctx'), accepted: 'return value;' }];
+  const withExamples = buildPrompt(input({ prefix, suffix, examples }));
+  assert.equal(withExamples.examplesUsed, 1);
+  assert.ok(withExamples.prefix.length < plain.prefix.length);
+  assert.ok(Math.abs(withExamples.chars - plain.chars) < 120, `${withExamples.chars} vs ${plain.chars}`);
+  // Still whole lines, still ending at the cursor.
+  assert.ok(withExamples.prefix.endsWith(prefix.slice(-200)));
+  assert.ok(withExamples.prefix.startsWith('line '));
+  // A short file is not trimmed at all: there is room for both.
+  const short = buildPrompt(input({ prefix: lines(8, 40), suffix: '', examples }));
+  assert.equal(short.prefix, lines(8, 40));
+});
+
+test('hints never take more than 40 % of the budget away from the file', () => {
+  const prefix = lines(400, 50);
+  const examples = [
+    { before: lines(6, 60, 'ctx'), accepted: 'x'.repeat(300) },
+    { before: lines(6, 60, 'ctx'), accepted: 'y'.repeat(300) },
+  ];
+  const built = buildPrompt(input({ prefix, suffix: '', styleProfile: 's'.repeat(700), examples }));
+  const budgetChars = 1000 * 2.4;
+  assert.ok(built.prefix.length >= budgetChars * 0.6 - 60, `prefix ${built.prefix.length}`);
+  assert.equal(built.examplesUsed, 2);
+  assert.ok(built.estimatedTokens <= LIMITS.hardTokens);
+});
+
 test('line and character caps apply even with a generous budget', () => {
-  const generous: PromptLimits = { ...LIMITS, fileTargetTokens: 100_000, hardTokens: 100_000 };
+  const generous: PromptLimits = { ...LIMITS, targetTokens: 100_000, hardTokens: 100_000 };
   const built = buildPrompt(input({ prefix: lines(500, 20), suffix: '\n' + lines(500, 20), limits: generous }));
   assert.ok(built.prefix.split('\n').length <= 60);
   assert.ok(built.prefix.length <= 3000);
@@ -118,7 +170,7 @@ test('a short suffix leaves its share of the budget to the prefix', () => {
 });
 
 test('hard limit: optional blocks go first, then the suffix, then the prefix', () => {
-  const tight: PromptLimits = { ...LIMITS, fileTargetTokens: 1000, hardTokens: 600 };
+  const tight: PromptLimits = { ...LIMITS, targetTokens: 1000, hardTokens: 600 };
   const examples = [
     { before: lines(5, 60), accepted: 'x'.repeat(200) },
     { before: lines(5, 60), accepted: 'y'.repeat(200) },

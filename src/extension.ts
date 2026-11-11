@@ -12,10 +12,15 @@ import {
   promptCacheEnabled,
   readConfig,
   setTriggerMode,
+  updateSetting,
   type GhostlineConfig,
 } from './config';
 import { isPathExcluded } from './context/exclusions';
-import { dayRow, statusText, tooltipLines, usesApiKey, type SessionInfo } from './usage/report';
+import { AdaptiveTrigger } from './learning/adaptiveTrigger';
+import { ExampleStore } from './learning/exampleStore';
+import { CONTEXT_LABELS, Learning } from './learning/learning';
+import { StyleManager, type Launcher } from './learning/styleManager';
+import { SLOW_P50_MS, dayRow, statusText, tooltipLines, usesApiKey, type SessionInfo } from './usage/report';
 import { TokenEstimator } from './usage/tokenEstimator';
 import { UsageTracker, type DayStats } from './usage/usageTracker';
 
@@ -24,6 +29,9 @@ const CWD_PREFIX = 'ghostline-cwd-';
 const STANDBY_MAX_IDLE_MS = 10 * 60_000;
 const FLUSH_INTERVAL_MS = 15_000;
 const CLI_RETRY_MS = 30_000;
+const SPEED_WARNING_KEY = 'ghostline.speedWarning.v1';
+/** Successful requests needed before today's median latency is worth acting on. */
+const MIN_REQUESTS_FOR_SPEED_WARNING = 20;
 
 /** What `activate` returns when the extension host runs the end-to-end suite. */
 export interface GhostlineTestApi {
@@ -31,6 +39,9 @@ export interface GhostlineTestApi {
   today(): DayStats;
   statusText(): string;
   logLines(): string[];
+  exampleCount(): number;
+  styleProfile(): string | undefined;
+  learnStyleFrom(paths: string[]): Promise<string>;
 }
 
 class Ghostline implements vscode.Disposable {
@@ -39,6 +50,9 @@ class Ghostline implements vscode.Disposable {
   private readonly usage: UsageTracker;
   private readonly estimator: TokenEstimator;
   private readonly provider: GhostlineProvider;
+  private readonly examples: ExampleStore;
+  private readonly adaptive: AdaptiveTrigger;
+  private readonly style: StyleManager;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly excludedCache = new Map<string, boolean>();
   private readonly warnedKeySources = new Set<string>();
@@ -58,6 +72,34 @@ class Ghostline implements vscode.Disposable {
     this.usage = new UsageTracker(context.globalState);
     this.estimator = new TokenEstimator(context.globalState.get(CALIBRATION_KEY));
     this.cwd = fs.mkdtempSync(path.join(os.tmpdir(), CWD_PREFIX));
+    // Phase 2: everything ghostline learns stays in the editor's local storage.
+    this.examples = new ExampleStore(context.workspaceState);
+    this.adaptive = new AdaptiveTrigger(context.globalState);
+    this.style = new StyleManager({
+      context,
+      getConfig: () => this.config,
+      launcher: () => this.launcher(),
+      cwd: this.cwd,
+      charsPerToken: () => this.estimator.charsPerToken,
+      usage: this.usage,
+      log: (line) => this.log(line),
+      onChange: () => this.queueRender(),
+    });
+    const learning = new Learning({
+      examples: this.examples,
+      adaptive: this.adaptive,
+      styleProfile: () => this.style.profile,
+      settings: () => this.config,
+      charsPerToken: () => this.estimator.charsPerToken,
+      onMuted: (languageId, triggerContext) => {
+        const where = `${languageId} ${CONTEXT_LABELS[triggerContext]}`;
+        this.log(`disparo adaptativo: casi nunca aceptas sugerencias en ${where}; silenciado 24 h (el modo manual sigue)`);
+        void vscode.window.showInformationMessage(
+          `ghostline: en ${where} casi nunca aceptas las sugerencias, así que dejo de sugerir ahí durante 24 h. ` +
+            'La invocación manual sigue funcionando.',
+        );
+      },
+    });
     this.provider = new GhostlineProvider({
       getConfig: () => this.config,
       getPool: () => this.getPool(),
@@ -67,7 +109,9 @@ class Ghostline implements vscode.Disposable {
       estimator: this.estimator,
       log: (line) => this.log(line),
       onActivity: () => this.queueRender(),
+      learning,
     });
+    void this.style.load();
 
     this.statusBar.command = 'ghostline.showMenu';
     this.statusBar.name = 'ghostline';
@@ -82,6 +126,10 @@ class Ghostline implements vscode.Disposable {
       vscode.commands.registerCommand('ghostline.openLog', () => this.channel.show(true)),
       vscode.commands.registerCommand('ghostline.showUsage', () => this.showUsage()),
       vscode.commands.registerCommand('ghostline.resetCounters', () => this.resetCounters()),
+      vscode.commands.registerCommand('ghostline.learnProjectStyle', () => this.style.learn()),
+      vscode.commands.registerCommand('ghostline.editProjectStyle', () => this.style.edit()),
+      vscode.commands.registerCommand('ghostline.clearLearning', () => this.clearLearning()),
+      vscode.workspace.onDidSaveTextDocument((document) => this.style.onSaved(document)),
       vscode.workspace.onDidChangeConfiguration((event) => this.onConfigChange(event)),
       vscode.workspace.onDidChangeTextDocument((event) => this.onDocumentChange(event)),
       vscode.window.onDidChangeTextEditorSelection((event) => {
@@ -116,6 +164,7 @@ class Ghostline implements vscode.Disposable {
   async flush(): Promise<void> {
     await this.usage.flush();
     await this.context.globalState.update(CALIBRATION_KEY, this.estimator.toJSON());
+    this.maybeWarnSlow();
     this.queueRender();
   }
 
@@ -175,6 +224,14 @@ class Ghostline implements vscode.Disposable {
     return this.pool;
   }
 
+  /** How to start the CLI for one-off requests (the style profile). */
+  private launcher(): Launcher {
+    const testCli = this.testCli();
+    if (testCli) return testCli;
+    const resolved = resolveCli(this.config.cliPath);
+    return resolved.ok ? { command: resolved.command, prefixArgs: [] } : { error: resolved.message };
+  }
+
   /**
    * Test runs only (extension host started with --extensionTestsPath): lets the end-to-end suite
    * point ghostline at the fake CLI. Ignored in normal use.
@@ -203,6 +260,9 @@ class Ghostline implements vscode.Disposable {
         return this.statusBar.text;
       },
       logLines: () => [...this.logLines],
+      exampleCount: () => this.examples.count(),
+      styleProfile: () => this.style.profile,
+      learnStyleFrom: (paths) => this.style.learnFrom(paths.map((file) => vscode.Uri.file(file))),
     };
   }
 
@@ -316,6 +376,45 @@ class Ghostline implements vscode.Disposable {
     this.render();
   }
 
+  private async clearLearning(): Promise<void> {
+    const choice = await vscode.window.showWarningMessage(
+      'ghostline: ¿borrar los ejemplos aceptados y el perfil de estilo de este proyecto, y reactivar los contextos silenciados?',
+      { modal: true },
+      'Borrar',
+    );
+    if (choice !== 'Borrar') return;
+    this.examples.clear();
+    this.adaptive.clear();
+    await this.style.clear();
+    this.render();
+  }
+
+  /** Spec §8e: when the median latency is above 1.5 s, say so once a day and offer the two ways out. */
+  private maybeWarnSlow(): void {
+    const day = this.usage.today();
+    if (day.latencies.length < MIN_REQUESTS_FOR_SPEED_WARNING) return;
+    const { p50 } = this.usage.latency(day);
+    if (p50 === undefined || p50 <= SLOW_P50_MS) return;
+    if (this.context.globalState.get<string>(SPEED_WARNING_KEY) === day.date) return;
+    void this.context.globalState.update(SPEED_WARNING_KEY, day.date);
+    this.log(`aviso de velocidad: la latencia mediana de hoy es de ${Math.round(p50)} ms`);
+    const manual = 'Pasar a modo manual';
+    const smaller = 'Reducir el contexto';
+    const options = this.config.triggerMode === 'manual' ? [smaller] : [manual, smaller];
+    void vscode.window
+      .showInformationMessage(
+        `ghostline: las sugerencias están tardando ${Math.round(p50)} ms de mediana hoy (lo normal es menos de 1 s).`,
+        ...options,
+      )
+      .then(async (choice) => {
+        if (choice === manual) await setTriggerMode('manual');
+        if (choice === smaller) {
+          await updateSetting('context.prefixLines', Math.max(10, Math.round(this.config.prefixLines / 2)));
+          await updateSetting('context.suffixLines', Math.round(this.config.suffixLines / 2));
+        }
+      });
+  }
+
   private async showMenu(): Promise<void> {
     type Action = vscode.QuickPickItem & { run: () => unknown };
     const manual = this.config.triggerMode === 'manual';
@@ -333,6 +432,17 @@ class Ghostline implements vscode.Disposable {
       { label: '$(output) Abrir el log', run: () => this.channel.show(true) },
       { label: '$(graph) Consumo de los últimos 7 días', run: () => this.showUsage() },
       { label: '$(trash) Reiniciar contadores', run: () => this.resetCounters() },
+      {
+        label: '$(mortar-board) Aprender estilo del proyecto',
+        description: this.style.profile ? 'vuelve a generar el perfil' : 'aún no hay perfil',
+        run: () => this.style.learn(),
+      },
+      ...(this.style.profile ? [{ label: '$(edit) Editar el perfil de estilo', run: () => this.style.edit() }] : []),
+      {
+        label: '$(clear-all) Borrar lo aprendido en este proyecto',
+        description: `${this.examples.count()} ejemplos`,
+        run: () => this.clearLearning(),
+      },
       {
         label: '$(gear) Ajustes de ghostline',
         run: () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:cristianemek.ghostline'),
@@ -387,6 +497,14 @@ class Ghostline implements vscode.Disposable {
       apiKeySource: this.init?.apiKeySource,
       cliError: this.cliError,
       rateLimit: this.rateLimit,
+      learning: {
+        examples: this.examples.count(),
+        hasProfile: this.style.profile !== undefined,
+        muted: this.adaptive
+          .report()
+          .filter((entry) => entry.mutedUntil !== undefined)
+          .map((entry) => `${entry.languageId} ${CONTEXT_LABELS[entry.context]}`),
+      },
     };
     this.statusBar.text = statusText(day, session);
     const tooltip = new vscode.MarkdownString(

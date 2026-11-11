@@ -7,8 +7,9 @@ import { summaryLine } from '../usage/report';
 import { formatRequestLine, type RequestLogEntry } from '../usage/requestLog';
 import type { UsageTracker } from '../usage/usageTracker';
 import { LruCache, Typeahead, completionKey, type DocumentReader } from './cache';
+import type { LearningHooks, SuggestionInfo } from './hooks';
 import { postprocess, shouldStopEarly, trimAgainstSuffix, type IndentStyle } from './postprocess';
-import { DEFAULT_LIMITS, buildPrompt, type PromptExample } from './promptBuilder';
+import { DEFAULT_LIMITS, buildPrompt } from './promptBuilder';
 import { TypingRate, classifyContext, cursorAllowsAuto, debounceDelay, wait, type TriggerContext } from './trigger';
 
 export const ACCEPT_COMMAND = 'ghostline._accepted';
@@ -24,33 +25,6 @@ const MIN_FILE_TOKENS = 300;
 const SUMMARY_EVERY = 20;
 /** Lines kept as the "before" context of a suggestion (5 previous lines + the current one). */
 const BEFORE_LINES = 6;
-
-/** A suggestion that reached the editor, as the learning layer sees it. */
-export interface SuggestionInfo {
-  id: number;
-  documentKey: string;
-  languageId: string;
-  context: TriggerContext;
-  manual: boolean;
-  /** The lines right before the cursor when it was shown. */
-  before: string;
-  text: string;
-}
-
-export interface PromptExtras {
-  styleProfile?: string;
-  examples?: PromptExample[];
-}
-
-/** Phase 2 plugs in here; without it the provider behaves as plain Phase 1. */
-export interface LearningHooks {
-  /** True when automatic suggestions are muted for this language and cursor context. */
-  isSuppressed(languageId: string, context: TriggerContext): boolean;
-  promptExtras(languageId: string, before: string): PromptExtras;
-  onShown(suggestion: SuggestionInfo): void;
-  onAccepted(suggestion: SuggestionInfo): void;
-  onIgnored(suggestion: SuggestionInfo): void;
-}
 
 /** Phase 3: signature lines for symbols on the current line. */
 export type SymbolProvider = (
@@ -262,7 +236,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
           ...DEFAULT_LIMITS,
           prefixLines: config.prefixLines,
           suffixLines: config.suffixLines,
-          fileTargetTokens: Math.max(MIN_FILE_TOKENS, TARGET_TOTAL_INPUT_TOKENS - estimator.overheadTokens),
+          targetTokens: Math.max(MIN_FILE_TOKENS, TARGET_TOTAL_INPUT_TOKENS - estimator.overheadTokens),
           charsPerToken: estimator.charsPerToken,
         },
       });
@@ -275,6 +249,11 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
         shouldStop: (text) => shouldStopEarly(text, { maxLines: config.maxLines, prefix: built.prefix, languageId }),
       });
       const logEntry = this.account(id, outcome, built.chars, languageId, triggerContext, manual);
+      logEntry.hints = [
+        ...(built.styleUsed ? ['estilo'] : []),
+        ...(built.examplesUsed > 0 ? [`${built.examplesUsed} ej.`] : []),
+        ...(built.symbolsUsed > 0 ? [`${built.symbolsUsed} símbolos`] : []),
+      ];
       if (config.logPrompts) {
         deps.log(`#${id} prompt (${built.chars} caracteres, ~${built.estimatedTokens} tokens):\n${built.text}`);
         deps.log(`#${id} respuesta (${outcome.status}): ${JSON.stringify(outcome.text)}`);

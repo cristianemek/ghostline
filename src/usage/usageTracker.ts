@@ -41,6 +41,11 @@ export interface RequestRecord {
   usage: Usage;
   costUsd: number;
   totalMs: number;
+  /**
+   * False for requests that are not completions (learning the project's style): their tokens count,
+   * but their latency and size would distort the completion statistics.
+   */
+  sample?: boolean;
 }
 
 const STORE_KEY = 'ghostline.usage.v1';
@@ -161,7 +166,7 @@ export class UsageTracker {
     if (record.status === 'error') day.errors++;
     else if (record.status === 'timeout') day.timeouts++;
     else if (record.status === 'cancelled') day.cancelled++;
-    else {
+    else if (record.sample !== false) {
       day.latencies.push(Math.round(record.totalMs));
       day.inputSamples.push(totalInputTokens(record.usage));
     }

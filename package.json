@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "publisher": "cristianemek",
   "license": "UNLICENSED",
@@ -60,6 +60,21 @@
       {
         "command": "ghostline.resetCounters",
         "title": "Reiniciar contadores",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.learnProjectStyle",
+        "title": "Aprender estilo del proyecto",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.editProjectStyle",
+        "title": "Editar el perfil de estilo del proyecto",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.clearLearning",
+        "title": "Borrar lo aprendido en este proyecto",
         "category": "ghostline"
       }
     ],
@@ -229,7 +244,12 @@
         "ghostline.learning.examples": {
           "type": "boolean",
           "default": true,
-          "description": "Guarda en local las sugerencias aceptadas y envía hasta 2 parecidas como ejemplo en cada petición."
+          "description": "Guarda en local (solo en este equipo) las sugerencias que aceptas y envía hasta 2 parecidas como ejemplo en cada petición (~300 tokens como máximo)."
+        },
+        "ghostline.learning.adaptiveTrigger": {
+          "type": "boolean",
+          "default": true,
+          "description": "Deja de sugerir automáticamente durante 24 h en los contextos (lenguaje + posición del cursor) donde aceptas menos del 10 % de las últimas 40 sugerencias. El modo manual no se ve afectado."
         },
         "ghostline.debug.logPrompts": {
           "type": "boolean",

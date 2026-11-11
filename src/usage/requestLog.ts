@@ -13,6 +13,8 @@ export interface RequestLogEntry {
   usage: Usage;
   /** Usage comes from `message_start` because the request was cut short. */
   usagePartial: boolean;
+  /** What was learned and went into the prompt, e.g. ["estilo", "2 ejemplos"]. */
+  hints?: string[];
 }
 
 function clock(time: Date): string {
@@ -31,7 +33,8 @@ function ms(value: number | null): string {
 export function formatRequestLine(entry: RequestLogEntry, outcome: string): string {
   const { usage } = entry;
   return [
-    `[${clock(entry.time)}] #${entry.id} ${entry.languageId} ${entry.context}${entry.manual ? ' (manual)' : ''}`,
+    `[${clock(entry.time)}] #${entry.id} ${entry.languageId} ${entry.context}${entry.manual ? ' (manual)' : ''}` +
+      (entry.hints && entry.hints.length > 0 ? ` [+${entry.hints.join(', ')}]` : ''),
     `espera ${ms(entry.waitForWorkerMs)}`,
     `primer token ${ms(entry.firstTokenMs)}`,
     `total ${ms(entry.totalMs)}`,
