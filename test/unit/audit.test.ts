@@ -8,7 +8,7 @@ import { projectBlock } from '../../src/context/projectIndex';
 import { formatSymbols } from '../../src/context/symbolText';
 import { buildFixPrompt } from '../../src/edit/fix';
 import { capProfile, cleanStyleGuide } from '../../src/learning/styleProfile';
-import { statusText, tooltipLines, type SessionInfo } from '../../src/usage/report';
+import { statusText, tooltipMarkdown, type SessionInfo } from '../../src/usage/report';
 import { TokenEstimator } from '../../src/usage/tokenEstimator';
 import { emptyDay } from '../../src/usage/usageTracker';
 
@@ -63,7 +63,7 @@ test('status bar and tooltip say when automatic suggestions are paused by errors
     trouble: { remainingMs: 41_500, reason: 'Invalid API key · Please run /login' },
   };
   assert.match(statusText(emptyDay('2026-11-11'), session), /^\$\(ghostline-ghost\) \$\(warning\) /);
-  const tooltip = tooltipLines(emptyDay('2026-11-11'), session).join('\n');
+  const tooltip = tooltipMarkdown(emptyDay('2026-11-11'), session);
   assert.match(tooltip, /en pausa 42 s por errores repetidos de la CLI: Invalid API key/);
   assert.match(tooltip, /invocación manual sigue disponible/);
 });

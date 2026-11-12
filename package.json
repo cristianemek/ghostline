@@ -105,6 +105,11 @@
         "category": "ghostline"
       },
       {
+        "command": "ghostline.openSettings",
+        "title": "Abrir los ajustes",
+        "category": "ghostline"
+      },
+      {
         "command": "ghostline.acceptEdit",
         "title": "Aplicar la corrección propuesta",
         "category": "ghostline"

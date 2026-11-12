@@ -111,41 +111,126 @@ export function plainStatus(text: string): string {
   return text.replace(MARK, 'ghostline').replace(/\$\([\w-]+\)\s*/g, '').trim();
 }
 
+/** The commands the tooltip's links may run; nothing else in it is clickable. */
+export const TOOLTIP_COMMANDS: readonly string[] = [
+  'ghostline.togglePause',
+  'ghostline.toggleTriggerMode',
+  'ghostline.showUsage',
+  'ghostline.showRecent',
+  'ghostline.openSettings',
+];
+
+/** Text that did not come from ghostline (a path, what the CLI said), safe inside the tooltip's markdown and HTML. */
+function plain(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/[\\`*_[\]()#|$~]/g, '\\$&');
+}
+
+const BAR_CELLS = 28;
+/** Half a block: side by side they make a bar, in any font that has box-drawing characters. */
+export const BAR_CELL = '▄';
+/** The editor only lets a tooltip set colours, and only from the theme: these are its variables. */
+const TRACK = '--vscode-disabledForeground';
+const tint = (variable: string, text: string): string => `<span style="color:var(${variable});">${text}</span>`;
+const small = (text: string): string => tint('--vscode-descriptionForeground', text);
+
+/** A meter drawn with text: each part takes its share of the cells; something used never takes none. */
+function meter(parts: readonly { rate: number; colour: string }[]): string {
+  let used = 0;
+  let drawn = '';
+  for (const part of parts) {
+    const rate = Math.min(1, Math.max(0, part.rate));
+    const cells = Math.min(BAR_CELLS - used, rate > 0 ? Math.max(1, Math.round(rate * BAR_CELLS)) : 0);
+    if (cells > 0) drawn += tint(part.colour, BAR_CELL.repeat(cells));
+    used += cells;
+  }
+  return drawn + (used < BAR_CELLS ? tint(TRACK, BAR_CELL.repeat(BAR_CELLS - used)) : '');
+}
+
 /**
- * Tooltip of the status bar item, one markdown line per entry: what the two figures mean, how the
- * suggestions are doing, and whatever needs attention. Nothing else.
+ * One figure of the tooltip: how much, in large type, and of what; the meter; and the numbers
+ * behind it. A tooltip cannot choose a size for its text, only a heading level.
  */
-export function tooltipLines(day: DayStats, session: SessionInfo): string[] {
-  const lines: string[] = [];
+function figure(value: string, of: string, bar: string, detail: string): string {
+  return `### ${value} &nbsp;${small(`· ${of}`)}\n\n${bar}  \n${small(detail)}`;
+}
+
+/**
+ * The status bar item's tooltip, as markdown with a little HTML: the name and the state on top,
+ * then whatever needs attention, the three figures each with its meter, and the things one would
+ * otherwise open the menu for.
+ */
+export function tooltipMarkdown(day: DayStats, session: SessionInfo): string {
   const state = session.paused ? 'en pausa' : session.triggerMode === 'manual' ? 'modo manual' : 'modo auto';
-  lines.push(`**ghostline** — ${state}`);
-  if (session.cliError) lines.push(`$(warning) ${session.cliError}`);
+  const blocks: string[] = [`## ${MARK}&nbsp; ghostline`, small(`Autocompletado con Claude · ${state}`)];
+
+  const warnings: string[] = [];
+  if (session.cliError) warnings.push(`$(warning) ${plain(session.cliError)}`);
   if (usesApiKey(session.apiKeySource)) {
-    lines.push(`$(warning) La CLI usa una API key (\`${session.apiKeySource}\`): se factura la API, no la suscripción.`);
+    warnings.push(`$(warning) La CLI usa una API key (${plain(session.apiKeySource ?? '')}): se factura la API, no la suscripción.`);
   }
   if (session.trouble) {
-    lines.push(
+    warnings.push(
       `$(warning) Sugerencias automáticas en pausa ${Math.ceil(session.trouble.remainingMs / 1000)} s por errores repetidos de la CLI: ` +
-        `${session.trouble.reason.slice(0, 160)}. La invocación manual sigue disponible.`,
+        `${plain(session.trouble.reason.slice(0, 160))}. La invocación manual sigue disponible.`,
     );
   }
   if (session.limitReached) {
-    lines.push(`$(circle-slash) Límite diario alcanzado (${session.dailyLimit}): el modo auto está en pausa, el manual sigue funcionando.`);
+    warnings.push(`$(circle-slash) Límite diario alcanzado (${session.dailyLimit}): el modo auto está en pausa, el manual sigue funcionando.`);
   }
-  lines.push(
+  if (warnings.length > 0) blocks.push(warnings.map((line) => tint('--vscode-editorWarning-foreground', line)).join('  \n'));
+
+  blocks.push('---');
+  blocks.push(
     session.dailyLimit > 0
-      ? `Tu tope diario: ${dailyShare(day, session.dailyLimit)} (${day.requests} de ${session.dailyLimit} peticiones)`
-      : `Hoy: ${day.requests} peticiones (sin tope diario)`,
+      ? figure(
+          dailyShare(day, session.dailyLimit),
+          'de tu tope diario',
+          meter([{ rate: day.requests / session.dailyLimit, colour: '--vscode-charts-purple' }]),
+          `${day.requests} de ${session.dailyLimit} peticiones hoy`,
+        )
+      : figure(String(day.requests), 'peticiones hoy', meter([]), 'sin tope diario'),
   );
-  const whole = session.rateLimit?.windows.five_hour;
-  lines.push(
-    `De la sesión de Claude (5 h), ghostline: ≈${sessionShare(session)} ` +
-      `(${usd(session.sessionSpentUsd)} de unos ${Math.round(session.sessionBudgetUsd)} $)` +
-      (whole ? ` · la sesión entera va por el ${share(whole.utilization)}` : ''),
+  // ghostline's own part of the session and, when the CLI has said it, how full the session is.
+  const whole = session.rateLimit?.windows.five_hour?.utilization;
+  const own = session.sessionBudgetUsd > 0 ? session.sessionSpentUsd / session.sessionBudgetUsd : 0;
+  const ownShare = sessionShare(session);
+  blocks.push(
+    figure(
+      /^\d/.test(ownShare) && own > 0 ? `≈${ownShare}` : ownShare,
+      'de la sesión de Claude (5 h)',
+      meter([
+        { rate: own, colour: '--vscode-charts-purple' },
+        { rate: whole === undefined ? 0 : Math.max(0, whole - own), colour: '--vscode-charts-blue' },
+      ]),
+      `ghostline: ${usd(session.sessionSpentUsd)} de unos ${Math.round(session.sessionBudgetUsd)} $` +
+        (whole === undefined ? '' : ` · la sesión entera va por el ${share(whole)}`),
+    ),
   );
-  lines.push(`Aceptadas: ${day.accepted} de ${day.shown} (${percent(acceptanceRate(day))})`);
-  if (session.muted && session.muted.length > 0) lines.push(`Silenciado 24 h: ${session.muted.join(', ')}`);
-  return lines;
+  blocks.push(
+    figure(
+      percent(acceptanceRate(day)),
+      'aceptadas',
+      meter([{ rate: acceptanceRate(day) ?? 0, colour: '--vscode-charts-green' }]),
+      `${day.accepted} de ${day.shown} sugerencias`,
+    ),
+  );
+  if (session.muted && session.muted.length > 0) blocks.push(small(`Silenciado 24 h: ${session.muted.map(plain).join(', ')}`));
+
+  blocks.push('---');
+  blocks.push(
+    [
+      `[$(${session.paused ? 'debug-start' : 'debug-pause'}) ${session.paused ? 'Reanudar' : 'Pausar'}](command:ghostline.togglePause)`,
+      `[$(${session.triggerMode === 'manual' ? 'zap' : 'person'}) ${session.triggerMode === 'manual' ? 'Modo auto' : 'Modo manual'}](command:ghostline.toggleTriggerMode)`,
+      '[$(graph) Consumo](command:ghostline.showUsage)',
+      '[$(history) Últimas](command:ghostline.showRecent)',
+      '[$(gear) Ajustes](command:ghostline.openSettings)',
+    ].join(' &nbsp;·&nbsp; '),
+  );
+  return blocks.join('\n\n');
 }
 
 /** Above this median latency the user is told and offered adjustments. */

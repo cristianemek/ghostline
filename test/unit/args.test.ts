@@ -2,7 +2,18 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildCliArgs, buildCliEnv, endpointOverride, userMessageLine } from '../../src/cli/args';
 import { formatRequestLine } from '../../src/usage/requestLog';
-import { dayRow, plainStatus, sessionStart, statusText, summaryLine, tooltipLines, usesApiKey, type SessionInfo } from '../../src/usage/report';
+import {
+  BAR_CELL,
+  TOOLTIP_COMMANDS,
+  dayRow,
+  plainStatus,
+  sessionStart,
+  statusText,
+  summaryLine,
+  tooltipMarkdown,
+  usesApiKey,
+  type SessionInfo,
+} from '../../src/usage/report';
 import { emptyDay } from '../../src/usage/usageTracker';
 
 test('the server the requests go to is reported when the environment points away from Anthropic, host only', () => {
@@ -138,23 +149,50 @@ test('status bar text: share of ghostline’s own daily cap · share of a Claude
   assert.equal(plainStatus(statusText(busyDay(), { ...session, cliError: 'no claude' })), 'ghostline sin CLI');
 });
 
-test('tooltip: the two figures explained, acceptance, and warnings; nothing else', () => {
-  const lines = tooltipLines(busyDay(), { ...session, rateLimit });
-  assert.deepEqual(lines, [
-    '**ghostline** — modo auto',
-    'Tu tope diario: 8% (123 de 1500 peticiones)',
-    'De la sesión de Claude (5 h), ghostline: ≈0,04% (0,0312 $ de unos 80 $) · la sesión entera va por el 59%',
-    'Aceptadas: 34 de 100 (34%)',
-  ]);
-  // Before the CLI has said anything about the session: ghostline's part only.
-  assert.match(tooltipLines(busyDay(), session).join('\n'), /ghostline: ≈0,04% \(0,0312 \$ de unos 80 \$\)$/m);
-  assert.match(tooltipLines(busyDay(), { ...session, dailyLimit: 0 }).join('\n'), /Hoy: 123 peticiones \(sin tope diario\)/);
-  assert.match(tooltipLines(busyDay(), { ...session, muted: ['go al final de línea'] }).join('\n'), /Silenciado 24 h: go al final de línea/);
+test('tooltip: name and state, the three figures with their meters, warnings, and shortcuts', () => {
+  /** How many cells of a meter are drawn in a colour of the theme. */
+  const cells = (markdown: string, colour: string): number[] =>
+    [...markdown.matchAll(new RegExp(`color:var\\(--vscode-${colour}\\);">(${BAR_CELL}+)<`, 'g'))].map((match) => (match[1] as string).length);
 
-  const withKey = tooltipLines(busyDay(), { ...session, apiKeySource: 'ANTHROPIC_API_KEY' }).join('\n');
-  assert.match(withKey, /usa una API key \(`ANTHROPIC_API_KEY`\)/);
-  const limited = tooltipLines(busyDay(), { ...session, limitReached: true }).join('\n');
-  assert.match(limited, /Límite diario alcanzado \(1500\)/);
+  const tooltip = tooltipMarkdown(busyDay(), { ...session, rateLimit });
+  assert.match(tooltip, /^## \$\(ghostline-ghost\)&nbsp; ghostline\n\n.*Autocompletado con Claude · modo auto/);
+  assert.match(tooltip, /^### 8% &nbsp;.*· de tu tope diario/m);
+  assert.match(tooltip, /123 de 1500 peticiones hoy/);
+  assert.match(tooltip, /^### ≈0,04% &nbsp;.*· de la sesión de Claude \(5 h\)/m);
+  assert.match(tooltip, /ghostline: 0,0312 \$ de unos 80 \$ · la sesión entera va por el 59%/);
+  assert.match(tooltip, /^### 34% &nbsp;.*· aceptadas/m);
+  assert.match(tooltip, /34 de 100 sugerencias/);
+  // Each meter is 28 cells: 8% of the cap, ghostline's sliver of a session that is 59% full, 34% accepted.
+  assert.deepEqual(cells(tooltip, 'charts-purple'), [2, 1]);
+  assert.deepEqual(cells(tooltip, 'charts-blue'), [17]);
+  assert.deepEqual(cells(tooltip, 'charts-green'), [10]);
+  assert.deepEqual(cells(tooltip, 'disabledForeground'), [26, 10, 18]);
+  // The shortcuts, and nothing clickable beyond ghostline's own commands.
+  assert.match(tooltip, /\[\$\(debug-pause\) Pausar\]\(command:ghostline\.togglePause\)/);
+  assert.match(tooltip, /\[\$\(person\) Modo manual\]\(command:ghostline\.toggleTriggerMode\)/);
+  for (const [, command] of tooltip.matchAll(/\(command:([\w.]+)/g)) assert.ok(TOOLTIP_COMMANDS.includes(command as string), command);
+  const paused = tooltipMarkdown(busyDay(), { ...session, paused: true, triggerMode: 'manual' });
+  assert.match(paused, /· en pausa/);
+  assert.match(paused, /\[\$\(debug-start\) Reanudar\]/);
+  assert.match(paused, /\[\$\(zap\) Modo auto\]/);
+
+  // Before the CLI has said anything about the session: ghostline's part only.
+  const alone = tooltipMarkdown(busyDay(), session);
+  assert.match(alone, /ghostline: 0,0312 \$ de unos 80 \$</);
+  assert.deepEqual(cells(alone, 'charts-blue'), []);
+  // Nothing used, nothing drawn.
+  assert.deepEqual(cells(tooltipMarkdown(emptyDay('2026-11-11'), { ...session, sessionSpentUsd: 0 }), 'charts-purple'), []);
+  assert.match(tooltipMarkdown(busyDay(), { ...session, dailyLimit: 0 }), /^### 123 &nbsp;.*· peticiones hoy[\s\S]*sin tope diario/m);
+  // A share too small to put a figure on is not also "about".
+  assert.match(tooltipMarkdown(busyDay(), { ...session, sessionSpentUsd: 0.0005 }), /^### <0,01% &nbsp;/m);
+  assert.match(tooltipMarkdown(busyDay(), { ...session, muted: ['go al final de línea'] }), /Silenciado 24 h: go al final de línea/);
+
+  assert.match(tooltipMarkdown(busyDay(), { ...session, apiKeySource: 'ANTHROPIC_API_KEY' }), /usa una API key \(ANTHROPIC\\_API\\_KEY\)/);
+  assert.match(tooltipMarkdown(busyDay(), { ...session, limitReached: true }), /Límite diario alcanzado \(1500\)/);
+  // What did not come from ghostline cannot bring markup, a link or an icon of its own.
+  const hostile = tooltipMarkdown(busyDay(), { ...session, cliError: 'no existe C:\\x\\[y](command:evil) <b>$(zap)</b>' });
+  assert.ok(!hostile.includes('](command:evil)') && !hostile.includes('<b>') && !/[^\\]\$\(zap\)<\/b>/.test(hostile), hostile);
+  assert.match(hostile, /\\\[y\\\]\\\(command:evil\\\) &lt;b&gt;\\\$\\\(zap\\\)&lt;\/b&gt;/);
 });
 
 test('the Claude session ghostline’s spend is measured against', () => {

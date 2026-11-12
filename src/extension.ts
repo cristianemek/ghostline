@@ -28,7 +28,18 @@ import { ExampleStore } from './learning/exampleStore';
 import { CONTEXT_LABELS, Learning } from './learning/learning';
 import { StyleManager, type Launcher } from './learning/styleManager';
 import { RecentSuggestions, formatRecent, type RecentEntry } from './usage/recent';
-import { MARK, SLOW_P50_MS, dayRow, plainStatus, sessionStart, statusText, tooltipLines, usesApiKey, type SessionInfo } from './usage/report';
+import {
+  MARK,
+  SLOW_P50_MS,
+  TOOLTIP_COMMANDS,
+  dayRow,
+  plainStatus,
+  sessionStart,
+  statusText,
+  tooltipMarkdown,
+  usesApiKey,
+  type SessionInfo,
+} from './usage/report';
 import { TokenEstimator } from './usage/tokenEstimator';
 import { UsageTracker, type DayStats } from './usage/usageTracker';
 
@@ -202,6 +213,7 @@ class Ghostline implements vscode.Disposable {
       vscode.commands.registerCommand('ghostline.editProjectStyle', () => this.style.edit()),
       vscode.commands.registerCommand('ghostline.clearLearning', () => this.clearLearning()),
       vscode.commands.registerCommand('ghostline.showRecent', () => this.showRecent()),
+      vscode.commands.registerCommand('ghostline.openSettings', () => this.openSettings()),
       vscode.commands.registerCommand('ghostline.acceptEdit', () => this.edits.accept()),
       vscode.commands.registerCommand('ghostline.dismissEdit', () => this.edits.dismiss()),
       vscode.languages.onDidChangeDiagnostics((event) => this.edits.diagnosticsChanged(event.uris)),
@@ -698,13 +710,14 @@ class Ghostline implements vscode.Disposable {
         description: `${this.examples.count()} ejemplos`,
         run: () => this.clearLearning(),
       },
-      {
-        label: '$(gear) Ajustes de ghostline',
-        run: () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:cristianemek.ghostline'),
-      },
+      { label: '$(gear) Ajustes de ghostline', run: () => this.openSettings() },
     ];
     const picked = await vscode.window.showQuickPick(actions, { title: 'ghostline', placeHolder: plainStatus(this.statusBar.text) });
     await picked?.run();
+  }
+
+  private openSettings(): Thenable<unknown> {
+    return vscode.commands.executeCommand('workbench.action.openSettings', '@ext:cristianemek.ghostline');
   }
 
   private async showUsage(): Promise<void> {
@@ -762,7 +775,10 @@ class Ghostline implements vscode.Disposable {
     this.statusBar.text = statusText(day, session);
     // The ghost is a picture: a screen reader gets the name instead.
     this.statusBar.accessibilityInformation = { label: plainStatus(this.statusBar.text) };
-    const tooltip = new vscode.MarkdownString(tooltipLines(day, session).join('  \n'), true);
+    const tooltip = new vscode.MarkdownString(tooltipMarkdown(day, session), true);
+    // Colours for the meters, and links that can run ghostline's own commands and nothing else.
+    tooltip.supportHtml = true;
+    tooltip.isTrusted = { enabledCommands: TOOLTIP_COMMANDS };
     this.statusBar.tooltip = tooltip;
     this.statusBar.backgroundColor = session.cliError
       ? new vscode.ThemeColor('statusBarItem.errorBackground')
