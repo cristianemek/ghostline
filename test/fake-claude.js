@@ -92,7 +92,13 @@ async function answer(message) {
   // In the middle of a line the prompt asks for the whole line: answer it with the completion in
   // place of the cursor mark, as a model following the instructions would.
   const line = /<line>([^\n]*)▮([^\n]*)<\/line>\s*$/.exec(prompt);
-  const text = line ? `${line[1]}${completion}${line[2]}` : completion;
+  // A correction: the region back with its placeholders filled in, as a model would.
+  const region = /<fix>/.test(prompt) ? /<region>\n([\s\S]*?)\n<\/region>/.exec(prompt) : null;
+  const text = region
+    ? region[1].replace('expression', 'true').replace('condition', 'a > b')
+    : line
+      ? `${line[1]}${completion}${line[2]}`
+      : completion;
 
   await sleep(delayMs);
   if (mode === 'noisy') {

@@ -19,6 +19,7 @@ import {
 import { isPathExcluded, unusablePatterns } from './context/exclusions';
 import { isIndexable, projectBlock } from './context/projectIndex';
 import { ProjectIndexer } from './context/projectIndexer';
+import { EditSuggester, type Proposal } from './edit/editSuggester';
 import { createSymbolProvider } from './context/symbols';
 import { AdaptiveTrigger, type ContextReport } from './learning/adaptiveTrigger';
 import { ExampleStore } from './learning/exampleStore';
@@ -50,6 +51,9 @@ export interface GhostlineTestApi {
   recent(): RecentEntry[];
   /** The system prompt the CLI is started with right now, after bringing the project index up to date. */
   systemPrompt(): Promise<string>;
+  /** Looks for something to correct next to the cursor now, without waiting for the idle time. */
+  checkEdits(): Promise<void>;
+  pendingEdit(): Proposal | undefined;
   adaptiveReport(): ContextReport[];
   refreshCount(): number;
   config(): GhostlineConfig;
@@ -69,6 +73,7 @@ class Ghostline implements vscode.Disposable {
   private readonly recent: RecentSuggestions;
   private readonly learning: Learning;
   private readonly indexer: ProjectIndexer;
+  private readonly edits: EditSuggester;
   /** The system prompt the CLI processes are started with: the bundled one, or a copy with the project index. */
   private systemPromptFile = '';
   /** What that file was built from, to tell when it has to be written again. */
@@ -155,6 +160,23 @@ class Ghostline implements vscode.Disposable {
       }),
     });
     void this.style.load();
+    this.edits = new EditSuggester({
+      getConfig: () => this.config,
+      getPool: () => this.getPool(),
+      isPaused: () => this.paused,
+      isExcluded: (document) => this.isExcluded(document),
+      completionBusy: () => this.provider.busy,
+      lastTyped: (document) => {
+        const typed = this.provider.lastTyped;
+        if (!typed || typed.documentKey !== document.uri.toString()) return undefined;
+        return { line: document.positionAt(typed.offset).line, at: typed.at };
+      },
+      usage: this.usage,
+      estimator: this.estimator,
+      log: (line) => this.log(line),
+      onActivity: () => this.queueRender(),
+      journal: this.recent,
+    });
 
     this.statusBar.command = 'ghostline.showMenu';
     this.statusBar.name = 'ghostline';
@@ -173,6 +195,10 @@ class Ghostline implements vscode.Disposable {
       vscode.commands.registerCommand('ghostline.editProjectStyle', () => this.style.edit()),
       vscode.commands.registerCommand('ghostline.clearLearning', () => this.clearLearning()),
       vscode.commands.registerCommand('ghostline.showRecent', () => this.showRecent()),
+      vscode.commands.registerCommand('ghostline.acceptEdit', () => this.edits.accept()),
+      vscode.commands.registerCommand('ghostline.dismissEdit', () => this.edits.dismiss()),
+      vscode.languages.onDidChangeDiagnostics((event) => this.edits.diagnosticsChanged(event.uris)),
+      vscode.window.onDidChangeActiveTextEditor(() => this.edits.editorChanged()),
       vscode.workspace.onDidSaveTextDocument((document) => this.style.onSaved(document)),
       // The project index follows the files: what a saved file declares, and files that come and go.
       vscode.workspace.onDidSaveTextDocument((document) => this.indexFile(document.uri)),
@@ -193,6 +219,7 @@ class Ghostline implements vscode.Disposable {
       vscode.window.onDidChangeTextEditorSelection((event) => {
         const active = event.selections[0]?.active;
         if (active) this.provider.cursorMoved(event.textEditor.document, active);
+        this.edits.selectionChanged(event.textEditor);
       }),
       vscode.window.onDidChangeActiveTextEditor(() => this.provider.dismiss()),
     );
@@ -209,6 +236,7 @@ class Ghostline implements vscode.Disposable {
 
   dispose(): void {
     clearInterval(this.flushTimer);
+    this.edits.dispose();
     this.provider.dispose();
     this.pool?.dispose();
     this.pool = null;
@@ -327,6 +355,8 @@ class Ghostline implements vscode.Disposable {
       exampleCount: () => this.examples.count(),
       confirmExamples: () => this.learning.confirmPending(),
       recent: () => this.recent.list(),
+      checkEdits: () => this.edits.check(),
+      pendingEdit: () => this.edits.proposal,
       systemPrompt: async () => {
         if (this.config.symbolContext) await this.indexer.scan();
         this.refreshProjectContext();
@@ -488,6 +518,8 @@ class Ghostline implements vscode.Disposable {
   }
 
   private onDocumentChange(event: vscode.TextDocumentChangeEvent): void {
+    // Any change to the text, undo and redo included, makes a correction on screen stale.
+    if (event.contentChanges.length > 0) this.edits.documentChanged(event.document);
     if (event.contentChanges.length === 0 || event.reason !== undefined) return;
     if (event.document !== vscode.window.activeTextEditor?.document) return;
     this.provider.noteKeystroke(event.document.uri.toString(), typedInsertionEnd(event.contentChanges));

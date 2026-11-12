@@ -503,6 +503,19 @@ export function trimAgainstSuffix(text: string, prefix: string, suffix: string, 
 }
 
 /**
+ * A whole block the model was asked to rewrite, as plain lines of code: without the markdown or tags
+ * it may have wrapped it in, and '' when the answer is not code at all (a refusal, an explanation,
+ * the model doubting itself, the "nothing to do" marker).
+ */
+export function cleanBlock(raw: string, languageId?: string): string {
+  let text = stripCodeFences(raw.replace(/\r\n?/g, '\n')).replace(/<\/?region>/g, '');
+  if (PROMPT_ECHO.test(text) || isChatter(text, '')) return '';
+  if (!(languageId && PROSE_LANGUAGES.has(languageId))) text = cutAtSelfTalk(text, '', '');
+  text = cutAtProse(text, '', '', languageId);
+  return text.replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '');
+}
+
+/**
  * With the cursor in the middle of a line the model is asked for the whole line as it should read,
  * which it gets right far more often than the bare insertion (measured: docs/acierto.md). Returns
  * what must be inserted at the cursor to turn the current line into that one, or '' when the answer

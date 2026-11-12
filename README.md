@@ -16,6 +16,7 @@ latencia después (la spec original ponía la latencia por delante de la calidad
 - Cuánto acierta y cómo se mide: [`docs/acierto.md`](docs/acierto.md)
 - Latencia, qué la limita y qué se hizo: [`docs/latencia.md`](docs/latencia.md)
 - Consumo en uso real y cómo gastar menos: [`docs/consumo.md`](docs/consumo.md)
+- Correcciones de código ya escrito: [`docs/correcciones.md`](docs/correcciones.md)
 
 ## Requisitos
 
@@ -31,7 +32,7 @@ Con Node 20 o posterior:
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.10.0.vsix
+code --install-extension ghostline-0.11.0.vsix
 ```
 
 ### En otro equipo (Ubuntu u otro Linux)
@@ -40,10 +41,10 @@ El repositorio es privado y no hay nada publicado, así que el `.vsix` se copia 
 
 1. Claude Code con tu suscripción: `npm install -g @anthropic-ai/claude-code`, luego `claude` y `/login`.
 2. La extensión, de una de estas dos formas:
-   - copia `ghostline-0.10.0.vsix` (unos 55 KB) al otro equipo; o
+   - copia `ghostline-0.11.0.vsix` (unos 55 KB) al otro equipo; o
    - genérala allí: `git clone https://github.com/cristianemek/ghostline.git`, y dentro `npm install` y
      `npm run package`.
-3. `code --install-extension ghostline-0.10.0.vsix` y recarga la ventana.
+3. `code --install-extension ghostline-0.11.0.vsix` y recarga la ventana.
 
 Si la barra de estado dice «sin CLI», VS Code no ha heredado el `PATH` de tu terminal: pon en
 `ghostline.cliPath` lo que devuelva `which claude`. Ese ajuste es por equipo y no se sincroniza. Lo aprendido
@@ -59,6 +60,13 @@ Windows.
   justo donde acabas de teclear (`conversation, |c.queries.Create(…)` → `err := `); la spec original no lo
   contemplaba. Ahí la sugerencia es de una sola línea, y no se pide dentro de una palabra, una cadena o un
   comentario, ni al pegar, borrar o mover el cursor. Se apaga con `ghostline.midLine: false`.
+- **Correcciones** (desde la v0.11, `ghostline.corrections`): cuando el compilador marca errores en código
+  junto al cursor que no estás tecleando en ese momento (un snippet con sus huecos sin rellenar, una llamada
+  con un argumento de más) y paras un segundo y medio, ghostline pide ese bloque reescrito y lo propone encima
+  del código: lo que cambiaría sale tachado y lo nuevo a continuación, en gris. `Tab` lo aplica, `Esc` lo
+  descarta, y al pasar el ratón se ve el bloque entero. No es texto fantasma porque la API estable de VS Code
+  solo deja a una extensión proponer inserciones, no sustituciones. Por el mismo código con los mismos errores
+  se pregunta una sola vez. Detalle y medidas en [`docs/correcciones.md`](docs/correcciones.md).
 - **Modo manual** (`ghostline.triggerMode: "manual"`): solo sugiere al invocar *Desencadenar sugerencia insertada*
   (`editor.action.inlineSuggest.trigger`). VS Code 1.144 ya no trae atajo por defecto para ese comando, así que
   ghostline le asigna `Alt+\` (la tecla física `\` del teclado US; en teclado español es `Alt+ç`). Se cambia en
@@ -137,6 +145,7 @@ Los de siempre, en *Ajustes → Extensiones → ghostline*:
 | `ghostline.debounceMs` | `600` | Pausa al teclear antes de pedir una sugerencia. |
 | `ghostline.dailyRequestLimit` | `1500` | 0 = sin tope. |
 | `ghostline.context.symbols` | `true` | Enviar declaraciones de otros archivos del proyecto (índice y símbolos). `false`: solo el archivo actual. |
+| `ghostline.corrections` | `true` | Proponer correcciones cuando hay errores del compilador junto al cursor. |
 | `ghostline.disabledLanguages` | `["markdown", "plaintext"]` | Solo afecta al modo auto. |
 | `ghostline.excludePatterns` | ver abajo | Archivos sensibles. |
 

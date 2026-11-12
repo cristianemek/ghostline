@@ -26,6 +26,8 @@ export interface GhostlineConfig {
   speculation: Speculation;
   /** Auto mode also asks right after typing in the middle of a line, with code after the cursor. */
   midLine: boolean;
+  /** Offer to rewrite code next to the cursor that the compiler rejects. */
+  corrections: boolean;
   maxLines: number;
   requestTimeoutMs: number;
   dailyRequestLimit: number;
@@ -134,6 +136,7 @@ export function readConfig(): GhostlineConfig {
     speculation: oneOf(user('speculation'), ['off', 'line'] as const, 'off'),
     // More requests, so the user's call; a workspace can only switch it off.
     midLine: user('midLine') !== false && workspace('midLine').every((value) => value !== false),
+    corrections: user('corrections') !== false && workspace('corrections').every((value) => value !== false),
     prefixLines: Math.min(prefixLines, ...workspace('context.prefixLines').map((value) => Math.floor(number(value, prefixLines, 1)))),
     suffixLines: Math.min(suffixLines, ...workspace('context.suffixLines').map((value) => Math.floor(number(value, suffixLines)))),
     // On unless the user switches it off; a workspace can switch it off, never on.

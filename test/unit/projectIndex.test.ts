@@ -8,6 +8,14 @@ test('index: Go functions, methods and types with their fields', () => {
     '',
     'const defaultModel = "claude-sonnet-5-5"',
     '',
+    'const (',
+    '\tMessageStatusPending   MessageStatus = "pending" // waiting',
+    '\tMessageStatusCompleted MessageStatus = "completed"',
+    '\tMessageStatusFailed    MessageStatus = "failed"',
+    '\tmaxTurns = 20',
+    '\tmaxTokens',
+    ')',
+    '',
     'type core struct {',
     '\tprovider llm.Provider',
     '\tqueries  *gen.Queries',
@@ -23,6 +31,8 @@ test('index: Go functions, methods and types with their fields', () => {
     '}',
   ].join('\n');
   assert.deepEqual(declarationsOf(source, 'api/core.go'), [
+    'const (MessageStatus) MessageStatusPending, MessageStatusCompleted, MessageStatusFailed',
+    'const maxTurns, maxTokens',
     'type core struct { provider llm.Provider; queries *gen.Queries }',
     'func (c *core) startTurn(ctx context.Context, conversationID pgtype.UUID, question string) (pgtype.UUID, []llm.Message, error)',
     'func toLLMMessages(rows []gen.ListContextMessagesRow) ([]llm.Message, error)',

@@ -105,6 +105,11 @@ fs.writeFileSync(
     '',
   ].join('\n'),
 );
+// Corrections: a snippet left with its placeholders, which the TypeScript server reports as errors.
+fs.writeFileSync(
+  path.join(workspace, 'src', 'broken.ts'),
+  ['export function pick(a: number, b: number): number {', '  switch (expression) {', '    case condition:', '      return a;', '  }', '  return b;', '}', ''].join('\n'),
+);
 // A line to accept a suggestion on.
 fs.writeFileSync(path.join(workspace, 'src', 'accept.ts'), 'const first = \nconst second = \n');
 fs.writeFileSync(
@@ -127,7 +132,16 @@ fs.writeFileSync(
   // must not be able to switch it back on. The symbols step turns it on for itself.
   // `recycleEvery` is one of the settings no longer listed in the Settings UI: still read from here.
   JSON.stringify(
-    { 'ghostline.debounceMs': 0, 'ghostline.context.symbols': false, 'ghostline.recycleEvery': 5, 'editor.insertSpaces': true, 'editor.tabSize': 2 },
+    // Corrections are on by default; here they are switched on only by the step that tests them, so
+    // that the other steps' request counts do not depend on what the TypeScript server reports.
+    {
+      'ghostline.debounceMs': 0,
+      'ghostline.context.symbols': false,
+      'ghostline.corrections': false,
+      'ghostline.recycleEvery': 5,
+      'editor.insertSpaces': true,
+      'editor.tabSize': 2,
+    },
     null,
     2,
   ),

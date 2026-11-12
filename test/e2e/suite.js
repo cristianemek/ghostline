@@ -670,6 +670,61 @@ async function run() {
     await setting('debug.logPrompts', false);
   });
 
+  await step('correcciones: con errores junto al cursor se propone el bloque reescrito; no se repite la pregunta; Tab lo aplica', async () => {
+    const broken = await open('src/broken.ts');
+    const editor = vscode.window.activeTextEditor;
+    editor.selection = new vscode.Selection(1, 10, 1, 10);
+    const errorsNow = () => vscode.languages.getDiagnostics(broken.uri).filter((item) => item.severity === vscode.DiagnosticSeverity.Error);
+    for (let attempt = 0; attempt < 80 && errorsNow().length < 2; attempt++) await sleep(500);
+    assert.ok(errorsNow().length >= 2, `el servidor de TypeScript marcó ${errorsNow().length} errores`);
+    // An automatic check may be on its way at the same time: look until one of the two has an answer.
+    const waitForEdit = async () => {
+      for (let attempt = 0; attempt < 20 && !api.pendingEdit(); attempt++) {
+        await api.checkEdits();
+        if (!api.pendingEdit()) await sleep(250);
+      }
+      return api.pendingEdit();
+    };
+
+    const before = api.today().requests;
+    const acceptedBefore = api.today().accepted;
+    // Switched off (as this suite's user has it): nothing is asked.
+    await api.checkEdits();
+    assert.equal(api.pendingEdit(), undefined);
+    assert.equal(api.today().requests, before);
+
+    await setting('corrections', true);
+    const proposal = await waitForEdit();
+    assert.ok(proposal, 'no hay corrección propuesta');
+    assert.deepEqual([proposal.region.startLine, proposal.region.endLine], [1, 4]);
+    assert.deepEqual(proposal.newLines, ['  switch (true) {', '    case a > b:', '      return a;', '  }']);
+    assert.equal(api.today().requests, before + 1);
+    assert.ok(api.logLines().some((line) => /corrección #\d+ typescript · líneas 2–5 · 2 errores .* 4 líneas propuestas/.test(line)), 'falta la línea de log');
+
+    // Discarded: the same code with the same errors is not asked about again.
+    await vscode.commands.executeCommand('ghostline.dismissEdit');
+    assert.equal(api.pendingEdit(), undefined);
+    await api.checkEdits();
+    await sleep(300);
+    assert.equal(api.pendingEdit(), undefined);
+    assert.equal(api.today().requests, before + 1);
+
+    // The code changes (still wrong): a new proposal, and this time it is applied.
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(broken.uri, new vscode.Range(3, 6, 3, 15), 'return a + 0;');
+    await vscode.workspace.applyEdit(edit);
+    for (let attempt = 0; attempt < 40 && errorsNow().length < 2; attempt++) await sleep(250);
+    const second = await waitForEdit();
+    assert.ok(second, 'no hay segunda corrección');
+    assert.equal(await vscode.commands.executeCommand('ghostline.acceptEdit'), true);
+    assert.equal(api.pendingEdit(), undefined);
+    assert.equal(broken.getText().replace(/\r\n/g, '\n').split('\n').slice(1, 5).join('\n'), '  switch (true) {\n    case a > b:\n      return a + 0;\n  }');
+    assert.equal(api.today().requests, before + 2);
+    assert.equal(api.today().accepted, acceptedBefore + 1);
+    assert.ok(api.recent().some((entry) => entry.context === 'corrección' && entry.outcome === 'aceptada'), 'la corrección no está en el diario');
+    await setting('corrections', false);
+  });
+
   fs.writeFileSync(process.env.GHOSTLINE_E2E_RESULT, JSON.stringify({ steps }));
   const failed = steps.filter((item) => !item.ok);
   if (failed.length > 0) throw new Error(`${failed.length} comprobaciones fallidas`);

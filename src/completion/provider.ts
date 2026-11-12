@@ -227,7 +227,16 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     this.typing.record(Date.now());
     this.edits++;
     this.typedAt = documentKey !== undefined && typedEnd !== undefined ? { documentKey, offset: typedEnd } : null;
+    if (this.typedAt) this.lastTyped = { ...this.typedAt, at: Date.now() };
   }
+
+  /** A suggestion is on screen or on its way: nothing else should compete for the user's attention. */
+  get busy(): boolean {
+    return this.live !== null || this.flight !== null || this.arrived !== null;
+  }
+
+  /** Where and when the user last typed something by hand (it outlives edits of other kinds). */
+  lastTyped: { documentKey: string; offset: number; at: number } | null = null;
 
   /** The item's command ran: the suggestion was accepted. */
   accepted(id: number): void {
@@ -519,10 +528,13 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       }
       this.breaker.success();
 
+      // With something after the cursor on its line only one line fits. The stream is stopped there,
+      // but several lines can arrive at once ("ctx, id)⏎⇥if err != nil {…"): keep up to the first one.
+      const answer = singleLine ? (/^\s*\S[^\n]*/.exec(outcome.text)?.[0] ?? '') : outcome.text;
       let text = postprocess({
         // In the middle of a line the model was asked for the whole line: what it adds at the
         // cursor is the completion, and an answer that changes either side of it is not one.
-        raw: built.line ? insertionFromLine(outcome.text, built.line.before, built.line.after) : outcome.text,
+        raw: built.line ? insertionFromLine(outcome.text, built.line.before, built.line.after) : answer,
         prefix: built.prefix,
         suffix: built.suffix,
         maxLines: config.maxLines,

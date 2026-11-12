@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "icon": "resources/icon.png",
   "private": true,
   "publisher": "cristianemek",
@@ -82,6 +82,16 @@
         "command": "ghostline.showRecent",
         "title": "Ver las últimas sugerencias",
         "category": "ghostline"
+      },
+      {
+        "command": "ghostline.acceptEdit",
+        "title": "Aplicar la corrección propuesta",
+        "category": "ghostline"
+      },
+      {
+        "command": "ghostline.dismissEdit",
+        "title": "Descartar la corrección propuesta",
+        "category": "ghostline"
       }
     ],
     "configuration": [
@@ -148,6 +158,13 @@
             "description": "Enviar también declaraciones de otros archivos del proyecto (firmas de funciones y campos de tipos; nunca valores ni archivos excluidos), para que las sugerencias usen lo que existe en vez de inventárselo. Desactívalo para enviar solo el archivo actual.",
             "order": 6
           },
+          "ghostline.corrections": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "description": "Proponer correcciones: cuando el compilador marca errores en código junto al cursor que no estás tecleando (un snippet sin rellenar, una llamada con un argumento de más), se ofrece ese bloque reescrito. Tab lo aplica y Esc lo descarta.",
+            "order": 7
+          },
           "ghostline.disabledLanguages": {
             "type": "array",
             "items": {
@@ -158,7 +175,7 @@
               "plaintext"
             ],
             "description": "Lenguajes en los que no se sugiere automáticamente.",
-            "order": 7
+            "order": 8
           },
           "ghostline.excludePatterns": {
             "type": "array",
@@ -196,7 +213,7 @@
               "**/.htpasswd"
             ],
             "description": "Archivos sensibles (patrones glob): nunca se sugiere en ellos ni se envía nada suyo.",
-            "order": 8
+            "order": 9
           }
         }
       },
@@ -328,6 +345,16 @@
         "command": "editor.action.inlineSuggest.trigger",
         "key": "alt+[Backslash]",
         "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "ghostline.acceptEdit",
+        "key": "tab",
+        "when": "ghostline.editVisible && editorTextFocus && !suggestWidgetVisible && !inlineSuggestionVisible"
+      },
+      {
+        "command": "ghostline.dismissEdit",
+        "key": "escape",
+        "when": "ghostline.editVisible && editorTextFocus && !suggestWidgetVisible && !inlineSuggestionVisible"
       }
     ]
   },

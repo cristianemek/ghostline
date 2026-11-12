@@ -72,6 +72,28 @@ function classMethods(lines: readonly string[], start: number, method: RegExp): 
   return methods;
 }
 
+/**
+ * Go: the names in a `const ( … )` block, grouped by type and without their values. They are what
+ * enums look like in Go ("MessageStatusFailed"), and a model that cannot see them makes one up.
+ */
+function goConstants(lines: readonly string[], start: number): { declarations: string[]; end: number } {
+  const byType = new Map<string, string[]>();
+  let type = '';
+  let index = start + 1;
+  for (; index < lines.length; index++) {
+    const line = (lines[index] as string).replace(/\s*\/\/.*$/, '').trim();
+    if (line.startsWith(')')) break;
+    const entry = /^([A-Za-z_]\w*)(?:\s+([\w.[\]*]+))?(\s*=.*)?$/.exec(line);
+    if (!entry) continue;
+    // A bare name repeats the previous line, type included (the usual iota list); one that is
+    // assigned a value without a type is an untyped constant.
+    type = entry[2] ?? (entry[3] ? '' : type);
+    byType.set(type, [...(byType.get(type) ?? []), entry[1] as string]);
+  }
+  const declarations = [...byType].map(([name, names]) => `const ${name ? `(${name}) ` : ''}${names.slice(0, 24).join(', ')}`);
+  return { declarations, end: index };
+}
+
 /** The declarations of one source file, one line each (methods indented under their class). */
 export function declarationsOf(text: string, path: string): string[] {
   const extension = /\.([A-Za-z0-9]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
@@ -80,6 +102,14 @@ export function declarationsOf(text: string, path: string): string[] {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const declarations: string[] = [];
   const seen = new Set<string>();
+  if (family === 'go') {
+    for (let index = 0; index < lines.length; index++) {
+      if (!/^const \($/.test((lines[index] as string).trimEnd())) continue;
+      const block = goConstants(lines, index);
+      declarations.push(...block.declarations);
+      index = block.end;
+    }
+  }
   for (let index = 0; index < lines.length && declarations.length < MAX_DECLARATIONS_PER_FILE; index++) {
     const line = lines[index] as string;
     if (!TOP_LEVEL[family].test(line)) continue;
