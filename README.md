@@ -1,4 +1,8 @@
-# ghostline
+<p align="center">
+  <img src="resources/icon.png" alt="" width="88">
+</p>
+
+<h1 align="center">ghostline</h1>
 
 Autocompletado inline (texto fantasma) para VS Code con tu agente de IA. No trae modelo ni servidor
 propios: lanza la herramienta de línea de comandos que ya tienes instalada, con la sesión o la clave que
