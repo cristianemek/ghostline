@@ -17,7 +17,7 @@ iniciada en ella.
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.12.0.vsix
+code --install-extension ghostline-0.13.0.vsix
 ```
 
 Si la barra de estado dice «sin CLI», pon en `ghostline.cliPath` la ruta del ejecutable (lo que devuelva
@@ -29,9 +29,9 @@ Si la barra de estado dice «sin CLI», pon en `ghostline.cliPath` la ruta del e
 - `Alt+\` (`Alt+ç` en teclado español) la pide a mano.
 - **Correcciones**: cuando el compilador marca errores junto al cursor, ghostline propone el bloque corregido
   encima del código. `Tab` lo aplica, `Esc` lo descarta.
-- **Barra de estado**: `ghostline 8% · Claude 0,5%` es lo que llevas de tu tope diario y la parte de una
-  sesión de Claude (5 h) que se ha llevado ghostline. Con un clic: pausar, cambiar de modo, ver el consumo,
-  el log y las últimas sugerencias.
+- **Barra de estado**: junto al fantasma, `8% · Claude 0,5%` es lo que llevas de tu tope diario y la parte
+  de una sesión de Claude (5 h) que se ha llevado ghostline. Con un clic: pausar, cambiar de modo, ver el
+  consumo, el log y las últimas sugerencias.
 
 ## Ajustes principales
 

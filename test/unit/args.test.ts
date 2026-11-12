@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildCliArgs, buildCliEnv, endpointOverride, userMessageLine } from '../../src/cli/args';
 import { formatRequestLine } from '../../src/usage/requestLog';
-import { dayRow, sessionStart, statusText, summaryLine, tooltipLines, usesApiKey, type SessionInfo } from '../../src/usage/report';
+import { dayRow, plainStatus, sessionStart, statusText, summaryLine, tooltipLines, usesApiKey, type SessionInfo } from '../../src/usage/report';
 import { emptyDay } from '../../src/usage/usageTracker';
 
 test('the server the requests go to is reported when the environment points away from Anthropic, host only', () => {
@@ -112,25 +112,30 @@ function busyDay() {
 
 test('status bar text: share of ghostline’s own daily cap · share of a Claude session ghostline has used', () => {
   // The second figure is ghostline's own part, not how full the session is (59% here).
-  assert.equal(statusText(busyDay(), { ...session, rateLimit }), 'ghostline 8% · Claude 0,04%');
-  assert.equal(statusText(busyDay(), session), 'ghostline 8% · Claude 0,04%');
-  assert.equal(statusText(emptyDay('2026-11-11'), { ...session, sessionSpentUsd: 0 }), 'ghostline 0% · Claude 0%');
+  assert.equal(statusText(busyDay(), { ...session, rateLimit }), '$(ghostline-ghost) 8% · Claude 0,04%');
+  assert.equal(statusText(busyDay(), session), '$(ghostline-ghost) 8% · Claude 0,04%');
+  assert.equal(statusText(emptyDay('2026-11-11'), { ...session, sessionSpentUsd: 0 }), '$(ghostline-ghost) 0% · Claude 0%');
   // Something used never reads as 0%.
   assert.equal(
     statusText({ ...emptyDay('2026-11-11'), requests: 11 }, { ...session, sessionSpentUsd: 0.0005 }),
-    'ghostline <1% · Claude <0,01%',
+    '$(ghostline-ghost) <1% · Claude <0,01%',
   );
   // The whole daily cap in one session: 1.500 × 0,00025 $.
-  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 0.375 }), 'ghostline 8% · Claude 0,47%');
+  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 0.375 }), '$(ghostline-ghost) 8% · Claude 0,47%');
   // Fewer decimals as it grows (another model, a smaller plan).
-  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 2.64 }), 'ghostline 8% · Claude 3,3%');
-  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 20 }), 'ghostline 8% · Claude 25%');
+  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 2.64 }), '$(ghostline-ghost) 8% · Claude 3,3%');
+  assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 20 }), '$(ghostline-ghost) 8% · Claude 25%');
   // Without a daily cap there is no share to show: the count.
-  assert.equal(statusText(busyDay(), { ...session, dailyLimit: 0 }), 'ghostline 123 · Claude 0,04%');
-  assert.match(statusText(busyDay(), { ...session, paused: true }), /^\$\(debug-pause\) ghostline 8%/);
-  assert.match(statusText(busyDay(), { ...session, triggerMode: 'manual' }), /^ghostline \(manual\) 8%/);
-  assert.match(statusText(busyDay(), { ...session, limitReached: true }), /^\$\(circle-slash\)/);
-  assert.match(statusText(busyDay(), { ...session, cliError: 'no claude' }), /sin CLI/);
+  assert.equal(statusText(busyDay(), { ...session, dailyLimit: 0 }), '$(ghostline-ghost) 123 · Claude 0,04%');
+  assert.match(statusText(busyDay(), { ...session, paused: true }), /^\$\(ghostline-ghost\) \$\(debug-pause\) 8%/);
+  assert.match(statusText(busyDay(), { ...session, triggerMode: 'manual' }), /^\$\(ghostline-ghost\) manual · 8%/);
+  assert.match(statusText(busyDay(), { ...session, limitReached: true }), /^\$\(ghostline-ghost\) \$\(circle-slash\) 8%/);
+  assert.match(statusText(busyDay(), { ...session, cliError: 'no claude' }), /^\$\(ghostline-ghost\) \$\(warning\) sin CLI$/);
+  // Where icons are not drawn (a prompt, a screen reader) the ghost is the name and the rest is words.
+  assert.equal(plainStatus(statusText(busyDay(), session)), 'ghostline 8% · Claude 0,04%');
+  assert.equal(plainStatus(statusText(busyDay(), { ...session, paused: true })), 'ghostline 8% · Claude 0,04%');
+  assert.equal(plainStatus(statusText(busyDay(), { ...session, triggerMode: 'manual' })), 'ghostline manual · 8% · Claude 0,04%');
+  assert.equal(plainStatus(statusText(busyDay(), { ...session, cliError: 'no claude' })), 'ghostline sin CLI');
 });
 
 test('tooltip: the two figures explained, acceptance, and warnings; nothing else', () => {

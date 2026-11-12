@@ -28,7 +28,7 @@ import { ExampleStore } from './learning/exampleStore';
 import { CONTEXT_LABELS, Learning } from './learning/learning';
 import { StyleManager, type Launcher } from './learning/styleManager';
 import { RecentSuggestions, formatRecent, type RecentEntry } from './usage/recent';
-import { SLOW_P50_MS, dayRow, sessionStart, statusText, tooltipLines, usesApiKey, type SessionInfo } from './usage/report';
+import { MARK, SLOW_P50_MS, dayRow, plainStatus, sessionStart, statusText, tooltipLines, usesApiKey, type SessionInfo } from './usage/report';
 import { TokenEstimator } from './usage/tokenEstimator';
 import { UsageTracker, type DayStats } from './usage/usageTracker';
 
@@ -703,7 +703,7 @@ class Ghostline implements vscode.Disposable {
         run: () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:cristianemek.ghostline'),
       },
     ];
-    const picked = await vscode.window.showQuickPick(actions, { title: 'ghostline', placeHolder: this.statusBar.text });
+    const picked = await vscode.window.showQuickPick(actions, { title: 'ghostline', placeHolder: plainStatus(this.statusBar.text) });
     await picked?.run();
   }
 
@@ -736,8 +736,9 @@ class Ghostline implements vscode.Disposable {
   private render(): void {
     const { config } = this;
     if (!config.enabled) {
-      this.statusBar.text = '$(circle-slash) ghostline';
+      this.statusBar.text = `${MARK} $(circle-slash)`;
       this.statusBar.tooltip = 'ghostline está desactivado ("ghostline.enabled": false).';
+      this.statusBar.accessibilityInformation = { label: 'ghostline, desactivado' };
       this.statusBar.backgroundColor = undefined;
       return;
     }
@@ -759,6 +760,8 @@ class Ghostline implements vscode.Disposable {
         .map((entry) => `${entry.languageId} ${CONTEXT_LABELS[entry.context]}`),
     };
     this.statusBar.text = statusText(day, session);
+    // The ghost is a picture: a screen reader gets the name instead.
+    this.statusBar.accessibilityInformation = { label: plainStatus(this.statusBar.text) };
     const tooltip = new vscode.MarkdownString(tooltipLines(day, session).join('  \n'), true);
     this.statusBar.tooltip = tooltip;
     this.statusBar.backgroundColor = session.cliError

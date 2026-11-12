@@ -197,7 +197,7 @@ async function run() {
     const before = api.today().requests;
     assert.equal(await ask(sample, 6, endOf(sample, 6)), undefined);
     assert.equal(api.today().requests, before);
-    assert.match(api.statusText(), /^ghostline \(manual\) /);
+    assert.match(api.statusText(), /^\$\(ghostline-ghost\) manual · /);
     const items = await ask(sample, 6, endOf(sample, 6), INVOKE);
     assert.equal(items?.length, 1);
     assert.equal(api.today().requests, before + 1);
@@ -206,7 +206,7 @@ async function run() {
 
   await step('barra de estado: % del tope diario propio · % de una sesión de Claude gastado por ghostline', async () => {
     // 5 requests out of 1.500, and what they cost against a session worth 80 $.
-    assert.match(api.statusText(), /^ghostline <1% · Claude (0%|<0,01%|\d+(,\d+)?%)$/);
+    assert.match(api.statusText(), /^\$\(ghostline-ghost\) <1% · Claude (0%|<0,01%|\d+(,\d+)?%)$/);
   });
 
   await step('límite diario: pausa el modo auto, lo indica y el manual sigue funcionando', async () => {
@@ -214,7 +214,7 @@ async function run() {
     const before = api.today().requests;
     assert.equal(await ask(sample, 10, endOf(sample, 10)), undefined);
     assert.equal(api.today().requests, before);
-    assert.match(api.statusText(), /^\$\(circle-slash\) ghostline/);
+    assert.match(api.statusText(), /^\$\(ghostline-ghost\) \$\(circle-slash\)/);
     const items = await ask(sample, 10, endOf(sample, 10), INVOKE);
     assert.equal(items?.length, 1);
     assert.equal(api.today().requests, before + 1);
@@ -226,7 +226,7 @@ async function run() {
     const before = api.today().requests;
     assert.equal(await ask(sample, 11, endOf(sample, 11)), undefined);
     assert.equal(api.today().requests, before);
-    assert.match(api.statusText(), /^\$\(debug-pause\) ghostline/);
+    assert.match(api.statusText(), /^\$\(ghostline-ghost\) \$\(debug-pause\)/);
     await vscode.commands.executeCommand('ghostline.togglePause');
     const items = await ask(sample, 11, endOf(sample, 11));
     assert.equal(items?.length, 1);
@@ -414,7 +414,7 @@ async function run() {
       line++;
       assert.equal(await next(), undefined);
       assert.equal(api.today().requests, before);
-      assert.match(api.statusText(), /^\$\(warning\) ghostline /);
+      assert.match(api.statusText(), /^\$\(ghostline-ghost\) \$\(warning\) /);
       assert.ok(api.logLines().some((entry) => entry.includes('en pausa') && entry.includes('Invalid API key')));
 
       // A manual request is never blocked…
@@ -426,7 +426,7 @@ async function run() {
       assert.equal((await next(INVOKE))?.length, 1);
       line++;
       assert.equal((await next())?.length, 1);
-      assert.doesNotMatch(api.statusText(), /^\$\(warning\)/);
+      assert.doesNotMatch(api.statusText(), /\$\(warning\)/);
     } finally {
       delete process.env.FAKE_MODE;
     }

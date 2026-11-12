@@ -87,19 +87,28 @@ export function usesApiKey(apiKeySource: string | undefined): boolean {
   return apiKeySource !== undefined && apiKeySource !== '' && apiKeySource !== 'none';
 }
 
+/** ghostline's own glyph: the ghost over its line, from the icon font declared in package.json ("icons"). */
+export const MARK = '$(ghostline-ghost)';
+
 /**
- * `ghostline 8% · Claude 0,03%`: how much of ghostline's own daily cap is used, and how much of a
- * whole Claude session ghostline has taken. Tokens, latency and cost are one click away, in the
- * last-7-days list and the log.
+ * The ghost, then `8% · Claude 0,03%`: how much of ghostline's own daily cap is used, and how much
+ * of a whole Claude session ghostline has taken. When there is something to say about its state, a
+ * second icon says it. Tokens, latency and cost are one click away, in the last-7-days list and
+ * the log.
  */
 export function statusText(day: DayStats, session: SessionInfo): string {
-  if (session.cliError) return '$(warning) ghostline: sin CLI';
+  if (session.cliError) return `${MARK} $(warning) sin CLI`;
   const counters = `${dailyShare(day, session.dailyLimit)} · Claude ${sessionShare(session)}`;
-  if (session.paused) return `$(debug-pause) ghostline ${counters}`;
-  if (session.trouble) return `$(warning) ghostline ${counters}`;
-  if (session.limitReached) return `$(circle-slash) ghostline ${counters}`;
-  if (session.triggerMode === 'manual') return `ghostline (manual) ${counters}`;
-  return `ghostline ${counters}`;
+  if (session.paused) return `${MARK} $(debug-pause) ${counters}`;
+  if (session.trouble) return `${MARK} $(warning) ${counters}`;
+  if (session.limitReached) return `${MARK} $(circle-slash) ${counters}`;
+  if (session.triggerMode === 'manual') return `${MARK} manual · ${counters}`;
+  return `${MARK} ${counters}`;
+}
+
+/** The status bar's text in words only, for where icons are not drawn (a prompt, a screen reader). */
+export function plainStatus(text: string): string {
+  return text.replace(MARK, 'ghostline').replace(/\$\([\w-]+\)\s*/g, '').trim();
 }
 
 /**

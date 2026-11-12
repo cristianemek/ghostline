@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>ghostline, one colour, for the status bar</title>
+  <!--
+    The ghost with its eyes cut out (drawn the other way round), and the line under it.
+    ghostline-icons.woff, next to this file, is this drawing as the glyph U+E001 of a font
+    (svgicons2svgfont, then svg2ttf, then ttf2woff): that is how VS Code takes an extension's icon.
+  -->
+  <path fill="#000" d="M192 384A320 320 0 0 1 832 384V704A106.67 106.67 0 0 1 618.67 704A106.67 106.67 0 0 1 405.33 704A106.67 106.67 0 0 1 192 704ZM345.6 332.8V409.6A51.2 51.2 0 0 0 448 409.6V332.8A51.2 51.2 0 0 0 345.6 332.8ZM576 332.8V409.6A51.2 51.2 0 0 0 678.4 409.6V332.8A51.2 51.2 0 0 0 576 332.8ZM236.8 870.4H787.2A44.8 44.8 0 0 1 787.2 960H236.8A44.8 44.8 0 0 1 236.8 870.4Z"/>
+</svg>

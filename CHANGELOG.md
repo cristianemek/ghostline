@@ -1,5 +1,9 @@
 # Cambios
 
+## 0.13.0
+
+- La barra de estado lleva el icono de ghostline (el fantasma sobre su línea) en lugar del nombre.
+
 ## 0.12.0
 
 - Sonnet con esfuerzo `low` pasa a ser la configuración por defecto: más rápido y más regular.
