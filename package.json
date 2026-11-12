@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) con Claude, a través de la CLI de Claude Code que ya tienes instalada.",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "icon": "resources/icon.png",
   "galleryBanner": {
     "color": "#1e1e2e",

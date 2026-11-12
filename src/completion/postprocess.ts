@@ -388,23 +388,44 @@ function unclosedOpeners(text: string): number {
   return stack.length;
 }
 
+/**
+ * Languages where a line can leave an element open (JSX, HTML, templates). Elsewhere a line ending
+ * in "<Name>" is a generic (`T: Into<String>`), which opens nothing.
+ */
+const ELEMENT_LANGUAGES = new Set([...MARKUP_LANGUAGES, 'javascript', 'blade', 'twig', 'jinja-html']);
+const VOID_TAG = /^(?:area|base|br|col|embed|hr|img|input|link|meta|source|track|wbr)$/i;
+
+/** Without a language (it is always known in the editor) tags are assumed possible. */
+function hasMarkup(languageId: string | undefined): boolean {
+  return languageId === undefined || ELEMENT_LANGUAGES.has(languageId);
+}
+
+/** True when the line ends inside an element it has opened: `<ul>`, `<li key={id}>`; not `<br />` nor `<li>…</li>`. */
+function opensTag(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.endsWith('>') || /[/=-]>$/.test(trimmed)) return false;
+  const tag = /^<([A-Za-z][\w.:-]*)/.exec(trimmed.slice(trimmed.lastIndexOf('<')));
+  return tag !== null && !VOID_TAG.test(tag[1] as string);
+}
+
 /** True when the line after this one is expected one level deeper. */
-function opensBlock(line: string): boolean {
+function opensBlock(line: string, markup: boolean): boolean {
   const trimmed = line.trim();
   // "// Steps:" ends with a colon but opens nothing.
   if (COMMENT_START.test(trimmed)) return false;
-  return /[{([:]$/.test(trimmed) || trimmed.endsWith('=>') || unclosedOpeners(trimmed) > 0;
+  return /[{([:]$/.test(trimmed) || trimmed.endsWith('=>') || unclosedOpeners(trimmed) > 0 || (markup && opensTag(trimmed));
 }
 
-function startsWithCloser(line: string): boolean {
-  return /^[)\]}]/.test(line.trimStart());
+function startsWithCloser(line: string, markup: boolean): boolean {
+  const trimmed = line.trimStart();
+  return /^[)\]}]/.test(trimmed) || (markup && trimmed.startsWith('</'));
 }
 
 /**
  * Re-bases the indentation of every line after the first on the current line. The model's absolute
  * indentation is unreliable (often off by a level), but its relative structure is fine.
  */
-function reindent(text: string, linePrefix: string, style: IndentStyle): string {
+function reindent(text: string, linePrefix: string, style: IndentStyle, markup: boolean): string {
   const lines = text.split('\n');
   if (lines.length < 2) return text;
   const anchorIndex = lines.findIndex((line, index) => index >= 1 && line.trim() !== '');
@@ -430,7 +451,7 @@ function reindent(text: string, linePrefix: string, style: IndentStyle): string 
   const anchorLine = lines[anchorIndex] as string;
   const expected = Math.max(
     0,
-    currentWidth + (opensBlock(currentLine) ? tabSize : 0) - (startsWithCloser(anchorLine) ? tabSize : 0),
+    currentWidth + (opensBlock(currentLine, markup) ? tabSize : 0) - (startsWithCloser(anchorLine, markup) ? tabSize : 0),
   );
 
   return lines
@@ -617,7 +638,7 @@ export function postprocess(input: PostprocessInput): string {
   }
   if (!text.trim()) return '';
 
-  const reindented = reindent(text, linePrefix, indent);
+  const reindented = reindent(text, linePrefix, indent, hasMarkup(input.languageId));
   text = removeSuffixOverlap(reindented, linePrefix, suffix, tabSize);
   // The model restated what follows the cursor and a space separated it from the new part.
   if (text.length < reindented.length && /[ \t]/.test(reindented[text.length] ?? '')) spaceAtEnd = true;

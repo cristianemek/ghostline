@@ -357,6 +357,29 @@ test('indentation: following lines are re-based on the current line', () => {
   );
 });
 
+test('indentation: an element left open puts what follows one level deeper, and its closing tag back', () => {
+  const tsx = (raw: string, prefix: string, suffix = '', languageId = 'typescriptreact'): string =>
+    postprocess({ raw, prefix, suffix, maxLines: 8, indent: SPACES_2, languageId });
+  // The model writes the children as if <ul> sat one level to the left of where the cursor is.
+  const prefix = 'export function OrderList() {\n  const { orders } = useOrders();\n\n  return (\n    ';
+  const raw =
+    '<ul>\n    {orders.map((order) => (\n      <li key={order.id}>\n        {order.customer} — {formatPrice(order.total)}\n      </li>\n    ))}\n  </ul>';
+  assert.equal(
+    tsx(raw, prefix, '\n  )\n}\n'),
+    '<ul>\n      {orders.map((order) => (\n        <li key={order.id}>\n          {order.customer} — {formatPrice(order.total)}\n        </li>\n      ))}\n    </ul>',
+  );
+  // The element was opened by what is already on the line.
+  assert.equal(tsx('\n<li>one</li>\n<li>two</li>', '    <ul>'), '\n      <li>one</li>\n      <li>two</li>');
+  // A closing tag after a child that opens nothing goes one level back.
+  assert.equal(tsx('<li>one</li>\n</ul>', '    <ul>\n      '), '<li>one</li>\n    </ul>');
+  // Closed on its own line, self-closed, or void: nothing is opened.
+  assert.equal(tsx('<p>one</p>\n<p>two</p>', '    '), '<p>one</p>\n    <p>two</p>');
+  assert.equal(tsx('<Spinner />\n<Footer />', '    '), '<Spinner />\n    <Footer />');
+  assert.equal(tsx('<br>\n<span>x</span>', '    ', '', 'html'), '<br>\n    <span>x</span>');
+  // Where there are no tags, a line ending in a generic opens nothing.
+  assert.equal(tsx('\n{\n  return fetchOrder();\n}', 'function load(): Promise<Order>', '', 'typescript'), '\n{\n  return fetchOrder();\n}');
+});
+
 test('indentation: relative structure is preserved whatever base the model used', () => {
   const expected = 'if (x) {\n      foo();\n    }';
   // Absolute, relative to zero, and with a different unit: same result.

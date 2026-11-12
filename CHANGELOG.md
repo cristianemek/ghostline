@@ -1,5 +1,10 @@
 # Cambios
 
+## 0.13.1
+
+- JSX, HTML y plantillas: lo que sigue a una etiqueta abierta queda un nivel más adentro y su cierre
+  vuelve al nivel de la apertura (antes, la lista dentro de un `<ul>` salía alineada con él).
+
 ## 0.13.0
 
 - La barra de estado lleva el icono de ghostline (el fantasma sobre su línea) en lugar del nombre.

@@ -17,7 +17,7 @@ iniciada en ella.
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.13.0.vsix
+code --install-extension ghostline-0.13.1.vsix
 ```
 
 Si la barra de estado dice «sin CLI», pon en `ghostline.cliPath` la ruta del ejecutable (lo que devuelva
