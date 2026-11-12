@@ -31,7 +31,7 @@ Con Node 20 o posterior:
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.9.0.vsix
+code --install-extension ghostline-0.10.0.vsix
 ```
 
 ### En otro equipo (Ubuntu u otro Linux)
@@ -40,10 +40,10 @@ El repositorio es privado y no hay nada publicado, así que el `.vsix` se copia 
 
 1. Claude Code con tu suscripción: `npm install -g @anthropic-ai/claude-code`, luego `claude` y `/login`.
 2. La extensión, de una de estas dos formas:
-   - copia `ghostline-0.9.0.vsix` (unos 55 KB) al otro equipo; o
+   - copia `ghostline-0.10.0.vsix` (unos 55 KB) al otro equipo; o
    - genérala allí: `git clone https://github.com/cristianemek/ghostline.git`, y dentro `npm install` y
      `npm run package`.
-3. `code --install-extension ghostline-0.9.0.vsix` y recarga la ventana.
+3. `code --install-extension ghostline-0.10.0.vsix` y recarga la ventana.
 
 Si la barra de estado dice «sin CLI», VS Code no ha heredado el `PATH` de tu terminal: pon en
 `ghostline.cliPath` lo que devuelva `which claude`. Ese ajuste es por equipo y no se sincroniza. Lo aprendido
@@ -84,12 +84,26 @@ Windows.
 |---|---|
 | Cada sugerencia es una conversación nueva en un proceso precalentado | Coste constante por petición; sin historial que crezca. Ahorra ~0,7 s de arranque. |
 | `--tools "" --safe-mode --strict-mcp-config --setting-sources project`, `cwd` vacío | Nada de herramientas, MCP, CLAUDE.md ni ajustes de usuario en el prompt. |
-| Caché de prompts desactivada en modo de un solo uso | Cada prompt es único: escribir en caché costaba el doble y nunca se leía. |
-| Presupuesto calibrado con el consumo real | El contexto se recorta para que la petición entera ronde los 1.900 tokens de entrada. |
+| Caché de prompts con escritura corta | El prompt de sistema, con el índice del proyecto dentro, se lee de la caché a un décimo del precio en cada petición. Lo que es propio de cada petición la CLI lo escribe en caché igualmente; se le pide la duración de 5 minutos (1,25x) en vez de la de una hora (2x). |
+| Presupuesto calibrado con el consumo real | El archivo se recorta para que la petición ronde los 1.900 tokens de entrada, sin contar el índice del proyecto (que va por caché). |
 | Debounce, caché LRU (200 entradas, 5 min) y typeahead | Si sigues tecleando lo sugerido o vuelves al mismo sitio, 0 tokens. |
 | Corte anticipado de la respuesta | Si el modelo se alarga o empieza a explicar, se mata el proceso. |
 | Sin petición justo tras aceptar | El modelo acaba de decir lo que tenía para ese punto; en uso real, volver a preguntar ahí devolvía vacío (3 de 11 peticiones). La siguiente tecla lo reactiva. |
 | Límite diario (`ghostline.dailyRequestLimit`) | Al alcanzarlo se pausa el modo auto; el manual sigue. |
+
+## Lo que sabe de tu proyecto
+
+Con `ghostline.context.symbols` activado (por defecto), además del archivo que editas el modelo recibe:
+
+- **El índice del proyecto** (desde la v0.10): qué funciones y tipos declara tu proyecto, una línea por
+  declaración, con los campos de structs e interfaces. ghostline lo construye al abrir el proyecto leyendo los
+  archivos de código (Go, TypeScript/JavaScript, Python y Rust; sin dependencias, salida de compilación ni
+  tests), lo actualiza al guardar y lo pone en el prompt de sistema. No interviene ningún modelo y no lleva
+  valores, solo nombres y tipos. Hasta unos 5.000 tokens: un proyecto que cabe va entero; si no, primero la
+  carpeta del archivo que editas y después las más cercanas. Sirve para que una sugerencia use la función que
+  ya existe tres archivos más allá en vez de inventarse otra ([`docs/fase-3.md`](docs/fase-3.md)).
+- **La declaración de lo que estás usando**: la firma, o los campos, de hasta 3 símbolos de la línea (también
+  de después del cursor y de la línea que abrió la llamada), localizada con el servidor de lenguaje.
 
 ## Lo que aprende de ti
 
@@ -113,43 +127,51 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 
 ## Ajustes
 
+Los de siempre, en *Ajustes → Extensiones → ghostline*:
+
 | Ajuste | Por defecto | |
 |---|---|---|
 | `ghostline.enabled` | `true` | |
-| `ghostline.cliPath` | `""` | Vacío: busca `claude` en `PATH`. |
-| `ghostline.model` | `"haiku"` | `sonnet` acierta algo más (15 frente a 13 de 24) y cuesta ~15 veces más. |
-| `ghostline.effort` | `"medium"` | Con `low` Haiku respeta peor las declaraciones (7 frente a 14 aciertos de 16); `high` no mejora. |
-| `ghostline.reasoning` | `"adaptive"` | El modelo decide cuándo razonar: ~52 % de líneas idénticas frente a ~32 % con `minimal`, que es más rápido. |
-| `ghostline.triggerMode` | `"auto"` | `auto` \| `manual` |
-| `ghostline.debounceMs` | `600` | Pausa al teclear para que se pida una sugerencia. |
-| `ghostline.speculation` | `"off"` | `line`: se adelanta en cada línea nueva y no espera tras aceptar (−23 % de espera, ~1,9x tokens). |
-| `ghostline.midLine` | `true` | Sugerir también en mitad de una línea, justo donde acabas de teclear. `false`: solo al final de la línea (menos peticiones). |
-| `ghostline.eagerDebounceMs` | `120` | Espera corta en una línea vacía con `speculation: line`. |
-| `ghostline.maxLines` | `6` | |
-| `ghostline.requestTimeoutMs` | `8000` | |
-| `ghostline.dailyRequestLimit` | `1500` | 0 = sin límite. |
-| `ghostline.claudeSessionUsd` | `80` | Lo que vale una sesión de Claude (5 h) en dólares de API; solo para el segundo porcentaje de la barra de estado. Cámbialo si cambias de plan. |
+| `ghostline.model` | `haiku` | Desplegable: `haiku`, `sonnet` (más regular y rápido, unas 12 veces más caro) u `opus`. |
+| `ghostline.triggerMode` | `auto` | `manual`: solo con el atajo. |
+| `ghostline.debounceMs` | `600` | Pausa al teclear antes de pedir una sugerencia. |
+| `ghostline.dailyRequestLimit` | `1500` | 0 = sin tope. |
+| `ghostline.context.symbols` | `true` | Enviar declaraciones de otros archivos del proyecto (índice y símbolos). `false`: solo el archivo actual. |
 | `ghostline.disabledLanguages` | `["markdown", "plaintext"]` | Solo afecta al modo auto. |
 | `ghostline.excludePatterns` | ver abajo | Archivos sensibles. |
-| `ghostline.workerMode` | `"single-use"` | `persistent`: un proceso que se recicla cada N peticiones. |
-| `ghostline.recycleEvery` | `8` | |
-| `ghostline.promptCache` | `"auto"` | `auto`: off en `single-use`, on en `persistent`. |
-| `ghostline.context.prefixLines` | `60` | |
-| `ghostline.context.suffixLines` | `20` | |
-| `ghostline.context.symbols` | `true` | Declaración de hasta 3 símbolos (firma, o los campos de un struct o interfaz del proyecto), vía servidor de lenguaje. `false`: solo se envía el archivo actual. |
-| `ghostline.learning.examples` | `false` | Guardar y enviar ejemplos de lo aceptado (solo lo que sigue en el archivo 10 minutos después). |
-| `ghostline.learning.adaptiveTrigger` | `true` | Silenciar 24 h los contextos donde casi nunca aceptas. |
+
+En la sección **Avanzado**, para cuando haga falta:
+
+| Ajuste | Por defecto | |
+|---|---|---|
+| `ghostline.cliPath` | `""` | Vacío: busca `claude` en el `PATH`. |
+| `ghostline.effort` | `medium` | Con `low` Haiku respeta peor las declaraciones (7 frente a 14 aciertos de 16); `high` no mejora. |
+| `ghostline.reasoning` | `adaptive` | `minimal`: sin razonar, más rápido y acierta bastante menos. |
+| `ghostline.midLine` | `true` | Sugerir también en mitad de una línea, justo donde acabas de teclear. |
+| `ghostline.maxLines` | `6` | |
+| `ghostline.speculation` | `off` | `line`: se adelanta en cada línea nueva (menos espera, casi el doble de tokens). |
+| `ghostline.requestTimeoutMs` | `8000` | |
+| `ghostline.claudeSessionUsd` | `80` | Lo que vale una sesión de Claude (5 h) en dólares de API; solo para el segundo porcentaje de la barra de estado. |
+| `ghostline.context.prefixLines` / `suffixLines` | `60` / `20` | Líneas del archivo que se envían antes y después del cursor. |
+| `ghostline.learning.adaptiveTrigger` | `true` | Silenciar 24 h los sitios donde casi nunca aceptas. |
+| `ghostline.learning.examples` | `false` | Enviar como ejemplo sugerencias aceptadas (empeoró el resultado en las pruebas). |
 | `ghostline.debug.logPrompts` | `false` | |
+
+Cuatro ajustes internos ya no aparecen en la pantalla de Ajustes, porque en las pruebas tenían un único valor
+bueno; se siguen leyendo si los escribes en `settings.json`: `ghostline.workerMode` (`single-use`),
+`ghostline.recycleEvery` (`8`), `ghostline.promptCache` (`auto`; `off` la desactiva) y
+`ghostline.eagerDebounceMs` (`120`).
 
 ## Privacidad y seguridad
 
 - Se envía contexto del **documento actual**: hasta 60 líneas antes y 20 después del cursor. Dos excepciones,
   ambas bajo tu control: el comando de aprender el estilo (envía el principio de los archivos que confirmas) y
-  `ghostline.context.symbols`, activado por defecto desde la v0.7.0. Este envía la declaración de hasta 3
-  símbolos definidos en otros archivos: la línea de firma o, para un struct, interfaz, tipo objeto o enum del
-  proyecto, sus campos (nombres y tipos, nunca valores). Con ella el modelo deja de inventarse los argumentos
-  de una llamada y los campos de un struct ([`docs/fase-3.md`](docs/fase-3.md)). Lo lee ghostline con el
-  servidor de lenguaje, no el modelo.
+  `ghostline.context.symbols`, activado por defecto. Con él viajan **declaraciones de otros archivos del
+  proyecto**: en cada petición, el índice del proyecto (firmas de funciones y campos de tipos de sus archivos
+  de código, hasta unos 5.000 tokens) y la declaración de hasta 3 símbolos que estés usando. Son nombres y
+  tipos, nunca valores ni cuerpos de función, y nunca de un archivo excluido
+  ([`docs/fase-3.md`](docs/fase-3.md)). Lo lee ghostline, no el modelo. Con `false` solo se envía el archivo
+  actual.
 - **Lo que queda en este equipo** (en el almacenamiento del área de trabajo de VS Code, nunca fuera): las
   últimas 40 respuestas con la línea del cursor, para poder revisarlas, y, si los activas, los ejemplos
   aceptados.

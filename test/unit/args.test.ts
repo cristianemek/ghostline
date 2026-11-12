@@ -52,6 +52,10 @@ test('environment: inherited, without prompt caching or auto-update, and detache
   // The caller's environment object is not modified.
   assert.equal(base.CLAUDECODE, '1');
   assert.equal(buildCliEnv({ DISABLE_PROMPT_CACHING: '1' }, { promptCache: true }).DISABLE_PROMPT_CACHING, undefined);
+  // With the cache on, what is unique to each request is written with the short (cheaper) lifetime.
+  assert.equal(buildCliEnv({}, { promptCache: true }).CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL, '5m');
+  assert.equal(buildCliEnv({ CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL: '1h' }, { promptCache: true }).CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL, '5m');
+  assert.equal(buildCliEnv({ CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL: '1h' }, { promptCache: false }).CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL, undefined);
 });
 
 test('input line: one JSON object per line, whatever the prompt contains', () => {

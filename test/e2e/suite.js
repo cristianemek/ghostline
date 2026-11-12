@@ -61,6 +61,10 @@ async function run() {
     assert.ok(config.excludePatterns.includes('**/.env.*'));
     assert.ok(config.excludePatterns.includes('**/only-this.txt'));
     assert.ok(config.disabledLanguages.includes('markdown'));
+    // The user switched the project context off; the repository asks for it and gets nothing.
+    assert.ok(!(await api.systemPrompt()).includes('<project>'), 'el índice del proyecto se activó desde el repositorio');
+    // A setting that is no longer listed in the Settings UI is still read from the user's settings.
+    assert.equal(config.recycleEvery, 5);
   });
 
   const sample = await open('src/sample.ts');
@@ -633,7 +637,36 @@ async function run() {
       prompt.includes('<symbols>\nexport interface ReportOptions { title: string; taxRate: number; currency?: string }  // src/lib.ts\n</symbols>'),
       `campos inesperados: ${prompt.slice(0, 300)}`,
     );
+
+    // The project index: what the workspace declares, in the system prompt the CLI is started with.
+    const system = await api.systemPrompt();
+    assert.ok(system.startsWith('You are a code autocompletion engine'), 'falta el prompt de sistema de siempre');
+    assert.ok(system.includes('<project>') && system.trimEnd().endsWith('</project>'), 'falta el bloque del proyecto');
+    assert.ok(system.includes('// src/lib.ts\nexport function computeTotal(items: number[], taxRate: number): number\n'), system.slice(-600));
+    assert.ok(system.includes('export interface ReportOptions { title: string; taxRate: number; currency?: string }'));
+    assert.ok(system.includes('// src/sample.ts\nexport function add(a: number, b: number): number\n'));
+    // Never from an excluded file, and nothing that is not source code.
+    assert.ok(!system.includes('loadSecretKey') && !system.includes('secretStore'), 'un archivo excluido llegó al índice');
+    assert.ok(!system.includes('E2E_FAKE_TOKEN') && !system.includes('notes.md'));
+    assert.ok(api.logLines().some((line) => /índice del proyecto: \d+ archivos, \d+ declaraciones/.test(line)));
+    // A request made now says so in the log, and the processes were restarted with the new prompt.
+    api.provider.clearCache();
+    assert.equal((await ask(uses, 4, endOf(uses, 4)))?.length, 1);
+    assert.ok(api.logLines().some((line) => /\[\+.*índice\]/.test(line)), 'la petición no indica que lleva el índice');
+    // Saving a file that declares something new brings the index up to date.
+    const added = new vscode.WorkspaceEdit();
+    added.insert(uses.uri, new vscode.Position(uses.lineCount, 0), '\nexport function freshlyAdded(count: number): string {\n  return String(count);\n}\n');
+    await vscode.workspace.applyEdit(added);
+    await uses.save();
+    let updated = '';
+    for (let attempt = 0; attempt < 20 && !updated.includes('freshlyAdded'); attempt++) {
+      await sleep(150);
+      updated = await api.systemPrompt();
+    }
+    assert.ok(updated.includes('export function freshlyAdded(count: number): string'), 'el índice no se actualizó al guardar');
+
     await setting('context.symbols', false);
+    assert.ok(!(await api.systemPrompt()).includes('<project>'), 'el índice sigue tras desactivar el contexto del proyecto');
     await setting('debug.logPrompts', false);
   });
 

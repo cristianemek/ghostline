@@ -185,7 +185,7 @@ export function extractSignature(lines: readonly string[], line: number, members
     next++;
   }
   // The body is of no use here: keep what comes before it.
-  signature = signature.replace(/\s*\{\s*$/, '').replace(/\s*=>\s*\{?\s*$/, ' =>').replace(/\s+/g, ' ').trim();
+  signature = signature.replace(/\s*\{\s*\}?\s*$/, '').replace(/\s*=>\s*\{?\s*$/, ' =>').replace(/\s+/g, ' ').trim();
   signature = withoutValues(signature);
   return signature.length > MAX_SIGNATURE_CHARS ? signature.slice(0, MAX_SIGNATURE_CHARS - 1) + '…' : signature;
 }

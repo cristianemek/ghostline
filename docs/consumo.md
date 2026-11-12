@@ -72,6 +72,24 @@ ghostline sería unas 4 veces la mostrada.
 Para situarse: una sugerencia cuesta unos 0,00025 $, así que un punto de la sesión son unas 3.200 sugerencias
 y el tope de 1.500 al día, hecho entero en una sola sesión, ronda el 0,5 %.
 
+## La caché de prompts, medida otra vez (v0.10.0)
+
+En el Paso 0 la caché solo costaba dinero y se desactivó. Con el prompt de sistema actual sí se lee entre
+procesos distintos. Mismo prompt de sistema, tres peticiones con mensajes diferentes, caché activada:
+
+| Prompt de sistema | 1.ª petición | 2.ª y 3.ª |
+|---|---|---|
+| 1.600 caracteres (el de la v0.9) | escrita 1.180 | leída 548 · escrita 632 |
+| 4.600 caracteres | escrita 2.423 | leída 1.792 · escrita 631 |
+| 7.600 caracteres | escrita 3.763 | leída 3.131 · escrita 632 |
+
+Lo que crece con el prompt de sistema se lee de caché (0,1x); lo propio de cada petición se escribe cada vez.
+Esa escritura es lo caro: la CLI la hace con duración de una hora (2x el precio de entrada). Con
+`CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL=5m` (o `FORCE_PROMPT_CACHING_5M=1`) pasa a 1,25x: la misma petición
+bajó de 0,00011 $ a 0,00008 $. Con eso, en peticiones de tamaño real la caché activada cuesta lo mismo que
+desactivada (0,00035 $ frente a 0,00033 $, dentro del ruido) y permite llevar el índice del proyecto casi
+gratis (`docs/fase-3.md`). Desde la v0.10.0 va activada, con esa variable.
+
 ## Lo que la CLI añade por su cuenta
 
 Preguntándole al modelo, con los mismos argumentos que usa ghostline, qué más ve además del prompt (12-nov-2026,

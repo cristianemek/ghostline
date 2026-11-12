@@ -155,11 +155,15 @@ export function affectsGhostline(event: vscode.ConfigurationChangeEvent): boolea
   return event.affectsConfiguration(SECTION);
 }
 
-/** Whether the API prompt cache stays on for the CLI processes (see docs/paso-0.md, finding 4). */
+/**
+ * Whether the API prompt cache stays on for the CLI processes. On unless switched off: the system
+ * prompt (with the project index in it) is read back from the cache by every later process, and the
+ * part unique to each request is written with the short lifetime (see `buildCliEnv` and
+ * docs/consumo.md). When the system prompt was a few hundred tokens it was never read back and the
+ * cache only cost money (docs/paso-0.md, finding 4), which is why it used to be off.
+ */
 export function promptCacheEnabled(config: GhostlineConfig): boolean {
-  if (config.promptCache === 'on') return true;
-  if (config.promptCache === 'off') return false;
-  return config.workerMode === 'persistent';
+  return config.promptCache !== 'off';
 }
 
 export async function setTriggerMode(mode: TriggerMode): Promise<void> {

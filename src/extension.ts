@@ -17,6 +17,8 @@ import {
   type GhostlineConfig,
 } from './config';
 import { isPathExcluded, unusablePatterns } from './context/exclusions';
+import { isIndexable, projectBlock } from './context/projectIndex';
+import { ProjectIndexer } from './context/projectIndexer';
 import { createSymbolProvider } from './context/symbols';
 import { AdaptiveTrigger, type ContextReport } from './learning/adaptiveTrigger';
 import { ExampleStore } from './learning/exampleStore';
@@ -46,6 +48,8 @@ export interface GhostlineTestApi {
   /** Decides now about the accepted suggestions still waiting to become examples. */
   confirmExamples(): void;
   recent(): RecentEntry[];
+  /** The system prompt the CLI is started with right now, after bringing the project index up to date. */
+  systemPrompt(): Promise<string>;
   adaptiveReport(): ContextReport[];
   refreshCount(): number;
   config(): GhostlineConfig;
@@ -64,6 +68,13 @@ class Ghostline implements vscode.Disposable {
   private readonly style: StyleManager;
   private readonly recent: RecentSuggestions;
   private readonly learning: Learning;
+  private readonly indexer: ProjectIndexer;
+  /** The system prompt the CLI processes are started with: the bundled one, or a copy with the project index. */
+  private systemPromptFile = '';
+  /** What that file was built from, to tell when it has to be written again. */
+  private systemPromptSource = '';
+  /** Characters the project index adds to the system prompt. */
+  private projectChars = 0;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly excludedCache = new Map<string, boolean>();
   private readonly warnedKeySources = new Set<string>();
@@ -88,6 +99,7 @@ class Ghostline implements vscode.Disposable {
     // Phase 2: everything ghostline learns stays in the editor's local storage.
     this.examples = new ExampleStore(context.workspaceState);
     this.recent = new RecentSuggestions(context.workspaceState);
+    this.indexer = new ProjectIndexer({ isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns) });
     this.adaptive = new AdaptiveTrigger(context.globalState);
     this.style = new StyleManager({
       context,
@@ -134,6 +146,7 @@ class Ghostline implements vscode.Disposable {
       },
       learning: this.learning,
       journal: this.recent,
+      projectContextChars: () => this.projectChars,
       // Phase 3, unless "ghostline.context.symbols" is off.
       symbols: createSymbolProvider({
         isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns),
@@ -161,6 +174,20 @@ class Ghostline implements vscode.Disposable {
       vscode.commands.registerCommand('ghostline.clearLearning', () => this.clearLearning()),
       vscode.commands.registerCommand('ghostline.showRecent', () => this.showRecent()),
       vscode.workspace.onDidSaveTextDocument((document) => this.style.onSaved(document)),
+      // The project index follows the files: what a saved file declares, and files that come and go.
+      vscode.workspace.onDidSaveTextDocument((document) => this.indexFile(document.uri)),
+      vscode.workspace.onDidCreateFiles((event) => event.files.forEach((uri) => this.indexFile(uri))),
+      vscode.workspace.onDidDeleteFiles((event) => {
+        if (event.files.map((uri) => this.indexer.remove(uri)).some(Boolean)) this.refreshProjectContext();
+      }),
+      vscode.workspace.onDidRenameFiles((event) => {
+        for (const { oldUri, newUri } of event.files) {
+          this.indexer.remove(oldUri);
+          this.indexFile(newUri);
+        }
+        this.refreshProjectContext();
+      }),
+      vscode.window.onDidChangeActiveTextEditor(() => this.refreshProjectContext()),
       vscode.workspace.onDidChangeConfiguration((event) => this.onConfigChange(event)),
       vscode.workspace.onDidChangeTextDocument((event) => this.onDocumentChange(event)),
       vscode.window.onDidChangeTextEditorSelection((event) => {
@@ -173,6 +200,9 @@ class Ghostline implements vscode.Disposable {
     this.flushTimer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS);
     this.flushTimer.unref();
     setTimeout(() => this.removeStaleCwds(), 5000).unref();
+    this.refreshProjectContext();
+    // The first look at the whole project waits for the editor to finish starting.
+    setTimeout(() => this.scanProject(), 1500).unref();
     this.render();
     this.log(`ghostline activo · carpeta de trabajo de la CLI: ${this.cwd}`);
   }
@@ -237,9 +267,7 @@ class Ghostline implements vscode.Disposable {
         commandPrefixArgs: testCli?.prefixArgs,
         model: config.model,
         effort: config.effort,
-        systemPromptFile: this.context.asAbsolutePath(
-          path.join('resources', config.reasoning === 'adaptive' ? 'system-prompt-adaptive.txt' : 'system-prompt.txt'),
-        ),
+        systemPromptFile: this.systemPromptFile,
         cwd: this.cwd,
         mode: config.workerMode,
         recycleEvery: config.recycleEvery,
@@ -299,6 +327,11 @@ class Ghostline implements vscode.Disposable {
       exampleCount: () => this.examples.count(),
       confirmExamples: () => this.learning.confirmPending(),
       recent: () => this.recent.list(),
+      systemPrompt: async () => {
+        if (this.config.symbolContext) await this.indexer.scan();
+        this.refreshProjectContext();
+        return fs.readFileSync(this.systemPromptFile, 'utf8');
+      },
       adaptiveReport: () => this.adaptive.report(),
       refreshCount: () => this.refreshes,
       config: () => this.config,
@@ -317,6 +350,61 @@ class Ghostline implements vscode.Disposable {
     this.pool = null;
     this.cliError = undefined;
     this.init = undefined;
+  }
+
+  // --- Project index ------------------------------------------------------------------------
+
+  private scanProject(): void {
+    if (!this.config.enabled || !this.config.symbolContext) return;
+    void this.indexer.scan().then(
+      () => this.refreshProjectContext(),
+      (error: unknown) => this.log(`índice del proyecto: no se pudo leer (${error instanceof Error ? error.message : String(error)})`),
+    );
+  }
+
+  private indexFile(uri: vscode.Uri): void {
+    if (!this.config.symbolContext || !this.indexer.ready || !isIndexable(uri.fsPath)) return;
+    void this.indexer.update(uri).then((changed) => {
+      if (changed) this.refreshProjectContext();
+    });
+  }
+
+  /**
+   * Decides which system prompt the CLI is started with: the bundled one or, when there is a project
+   * index, a copy of it with the index at the end. A new one means new processes: the ones already
+   * running were started with the old text. Called whenever the index, the file being edited or
+   * the settings may have changed; it does nothing unless the result is different.
+   */
+  private refreshProjectContext(): void {
+    const { config } = this;
+    const bundled = this.context.asAbsolutePath(
+      path.join('resources', config.reasoning === 'adaptive' ? 'system-prompt-adaptive.txt' : 'system-prompt.txt'),
+    );
+    const index = config.enabled && config.symbolContext ? this.indexer.index(vscode.window.activeTextEditor?.document.uri) : undefined;
+    const block = index ? projectBlock(index) : '';
+    const source = `${bundled}\n${block}`;
+    if (source === this.systemPromptSource) return;
+    this.systemPromptSource = source;
+    let file = bundled;
+    if (block && index) {
+      try {
+        const folder = (this.context.storageUri ?? this.context.globalStorageUri).fsPath;
+        fs.mkdirSync(folder, { recursive: true });
+        file = path.join(folder, 'system-prompt.txt');
+        fs.writeFileSync(file, fs.readFileSync(bundled, 'utf8').trimEnd() + '\n' + block);
+        this.log(
+          `índice del proyecto: ${index.files} archivos, ${index.declarations} declaraciones, ` +
+            `~${Math.round(block.length / this.estimator.charsPerToken)} tokens` +
+            (index.omitted > 0 ? ` (${index.omitted} archivos más no caben)` : ''),
+        );
+      } catch (error) {
+        this.log(`índice del proyecto: no se pudo escribir (${error instanceof Error ? error.message : String(error)}); se sigue sin él`);
+        file = bundled;
+      }
+    }
+    this.projectChars = file === bundled ? 0 : block.length;
+    this.systemPromptFile = file;
+    if (this.pool) this.resetPool();
   }
 
   private onInit(info: InitInfo): void {
@@ -360,6 +448,9 @@ class Ghostline implements vscode.Disposable {
     // Cached suggestions were produced under the old settings (line limit, exclusions, model…).
     this.provider.clearCache();
     if (affectsPool(event) || !this.config.enabled) this.resetPool();
+    // Exclusions, the reasoning mode and the switch itself all change what the index may hold.
+    if (this.config.symbolContext) this.scanProject();
+    this.refreshProjectContext();
     this.warnAboutPatterns();
     this.queueRender();
   }

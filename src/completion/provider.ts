@@ -82,6 +82,11 @@ export interface ProviderDeps {
   learning?: LearningHooks;
   symbols?: SymbolProvider;
   journal?: SuggestionJournal;
+  /**
+   * Characters of project index in the system prompt (0 without one). They are input tokens of every
+   * request without being part of the prompt built here, so the size estimate has to know about them.
+   */
+  projectContextChars?(): number;
 }
 
 interface LiveSuggestion extends SuggestionInfo {
@@ -496,6 +501,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
         ...(built.symbolsUsed > 0
           ? [`símbolos: ${symbols.slice(0, built.symbolsUsed).map((symbol) => symbol.name).join(', ')}`]
           : []),
+        ...((deps.projectContextChars?.() ?? 0) > 0 ? ['índice'] : []),
       ];
       if (config.logPrompts) {
         deps.log(`#${id} prompt (${built.chars} caracteres, ~${built.estimatedTokens} tokens):\n${built.text}`);
@@ -708,12 +714,16 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     // Cut off before the model said anything: the CLI never got to report usage, but the request
     // had been sent. Whether it is billed is not visible from here, so it is kept apart as an
     // estimate instead of being counted as free.
+    // The project index rides in the system prompt: tokens of the request, not of this prompt. Left
+    // out of what the estimator learns, so that its fixed overhead stays the fixed overhead and the
+    // budget for the file does not shrink by the size of the index.
+    const projectTokens = Math.round((deps.projectContextChars?.() ?? 0) / deps.estimator.charsPerToken);
     if (outcome.status !== 'ok' && outcome.usage.inputTokens === 0 && outcome.totalMs > SENT_TO_API_MS) {
-      deps.usage.recordUnconfirmed(deps.estimator.estimateTotal(promptChars));
+      deps.usage.recordUnconfirmed(deps.estimator.estimateTotal(promptChars) + projectTokens);
     }
     // Only clean single-round requests teach the estimator: a CLI retry doubles the input tokens.
     if (outcome.status === 'ok' && !outcome.usagePartial && outcome.numTurns <= 1) {
-      deps.estimator.observe(promptChars, totalInputTokens(outcome.usage));
+      deps.estimator.observe(promptChars, Math.max(1, totalInputTokens(outcome.usage) - projectTokens));
     }
     if (outcome.status === 'ok') {
       const day = deps.usage.today();

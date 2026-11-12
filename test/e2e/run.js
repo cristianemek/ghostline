@@ -125,7 +125,12 @@ fs.writeFileSync(
   path.join(root, 'user-data', 'User', 'settings.json'),
   // Symbol context is on by default; here the user has switched it off, and the repository below
   // must not be able to switch it back on. The symbols step turns it on for itself.
-  JSON.stringify({ 'ghostline.debounceMs': 0, 'ghostline.context.symbols': false, 'editor.insertSpaces': true, 'editor.tabSize': 2 }, null, 2),
+  // `recycleEvery` is one of the settings no longer listed in the Settings UI: still read from here.
+  JSON.stringify(
+    { 'ghostline.debounceMs': 0, 'ghostline.context.symbols': false, 'ghostline.recycleEvery': 5, 'editor.insertSpaces': true, 'editor.tabSize': 2 },
+    null,
+    2,
+  ),
 );
 // What a hostile repository would ship: every one of these tries to make ghostline send or spend
 // more than the user configured, and must be ignored.

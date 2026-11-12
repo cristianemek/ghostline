@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "icon": "resources/icon.png",
   "private": true,
   "publisher": "cristianemek",
@@ -84,248 +84,245 @@
         "category": "ghostline"
       }
     ],
-    "configuration": {
-      "title": "ghostline",
-      "properties": {
-        "ghostline.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Activa o desactiva ghostline. Un área de trabajo puede desactivarlo para sí misma, pero no reactivarlo si lo has desactivado en tus ajustes de usuario."
-        },
-        "ghostline.cliPath": {
-          "type": "string",
-          "default": "",
-          "scope": "machine",
-          "markdownDescription": "Ruta al ejecutable de Claude Code. Vacío: se busca `claude` en `PATH`. En Windows debe ser un `.exe` (o el `claude.cmd` de npm, que se resuelve a su `.exe`); nunca se lanza con shell."
-        },
-        "ghostline.model": {
-          "type": "string",
-          "default": "haiku",
-          "description": "Modelo que se pasa a la CLI con --model. Medido: sonnet acierta algo más que haiku (15 frente a 13 de 24) y cuesta unas 15 veces más por petición.",
-          "scope": "application"
-        },
-        "ghostline.effort": {
-          "type": "string",
-          "enum": [
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max"
-          ],
-          "default": "medium",
-          "description": "Nivel de esfuerzo que se pasa a la CLI con --effort. «medium» desde la v0.9: en llamadas reales Haiku pasó de 7 a 14 aciertos de 16 respecto a «low», por un ~12 % más de coste por petición; «high» no mejoró y tarda más.",
-          "scope": "application"
-        },
-        "ghostline.reasoning": {
-          "type": "string",
-          "enum": [
-            "minimal",
-            "adaptive"
-          ],
-          "enumDescriptions": [
-            "Se pide al modelo que responda sin razonar. Más rápido (p95 ~1,8 s) y un 17 % más barato por petición, pero acierta bastante menos: ~32 % de líneas idénticas en las pruebas.",
-            "El modelo decide cuándo razonar. Acierta más (~52 % de líneas idénticas) y sale más barato por sugerencia buena; una de cada cuatro peticiones tarda 2-3 s."
-          ],
-          "default": "adaptive",
-          "description": "Si el modelo puede razonar antes de sugerir. Medidas en docs/acierto.md.",
-          "scope": "application"
-        },
-        "ghostline.triggerMode": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "manual"
-          ],
-          "enumDescriptions": [
-            "Sugiere al dejar de teclear.",
-            "Solo sugiere al invocar «Desencadenar sugerencia insertada» (editor.action.inlineSuggest.trigger)."
-          ],
-          "default": "auto",
-          "description": "Cuándo se piden sugerencias. Un área de trabajo puede pedir el modo manual, pero no forzar el automático."
-        },
-        "ghostline.debounceMs": {
-          "type": "number",
-          "default": 600,
-          "minimum": 0,
-          "description": "Pausa, en milisegundos, que hay que hacer al teclear para que se pida una sugerencia. Más corta = sugerencias antes y más peticiones que se quedan sin usar. Si un área de trabajo indica otro valor, se usa el mayor."
-        },
-        "ghostline.speculation": {
-          "type": "string",
-          "enum": [
-            "off",
-            "line"
-          ],
-          "enumDescriptions": [
-            "No se adelanta: solo pide tras una pausa completa (ghostline.debounceMs). Es lo que menos tokens gasta.",
-            "Se adelanta una vez por línea nueva (espera corta en una línea vacía) y no espera tras aceptar una sugerencia. Medido: ~23 % menos de espera mediana y ~1,9x tokens."
-          ],
-          "default": "off",
-          "scope": "application",
-          "description": "Si ghostline se adelanta a tu pausa para que la sugerencia esté antes. En ambos casos, una petición ya enviada se aprovecha mientras lo que tecleas coincide con lo que responde."
-        },
-        "ghostline.midLine": {
-          "type": "boolean",
-          "default": true,
-          "scope": "application",
-          "description": "En modo auto, sugerir también en mitad de una línea (con código detrás del cursor) justo donde acabas de teclear: por ejemplo «conversation, |c.queries.Create(…)» → «err := ». Nunca dentro de una palabra, una cadena o un comentario, ni al pegar o borrar. Desactívalo para que solo se sugiera al final de la línea o ante caracteres de cierre, que gasta menos."
-        },
-        "ghostline.eagerDebounceMs": {
-          "type": "number",
-          "default": 120,
-          "minimum": 0,
-          "description": "Espera corta que se usa en una línea vacía cuando ghostline.speculation es \"line\". Nunca es menor que 1,6 veces tu ritmo de tecleo reciente. Si un área de trabajo indica otro valor, se usa el mayor."
-        },
-        "ghostline.maxLines": {
-          "type": "number",
-          "default": 6,
-          "minimum": 1,
-          "description": "Número máximo de líneas de una sugerencia. Si un área de trabajo indica otro valor, se usa el menor."
-        },
-        "ghostline.requestTimeoutMs": {
-          "type": "number",
-          "default": 8000,
-          "minimum": 1000,
-          "description": "Tiempo máximo por petición. Si se supera, se mata el proceso y no se sugiere nada.",
-          "scope": "application"
-        },
-        "ghostline.dailyRequestLimit": {
-          "type": "number",
-          "default": 1500,
-          "minimum": 0,
-          "description": "Peticiones diarias a partir de las cuales se pausa el modo auto (el manual sigue funcionando). 0 = sin límite.",
-          "scope": "application"
-        },
-        "ghostline.claudeSessionUsd": {
-          "type": "number",
-          "default": 80,
-          "minimum": 1,
-          "description": "Lo que vale una sesión entera de Claude (la ventana de 5 horas de tu suscripción) en dólares de API. Solo sirve para calcular el segundo porcentaje de la barra de estado: qué parte de la sesión ha gastado ghostline. Anthropic no publica la cifra; 80 se midió el 11-nov-2026 con este plan (ver docs/consumo.md) y está tirando a bajo, así que el porcentaje sale, como mucho, algo alto. Cámbialo si cambias de plan.",
-          "scope": "application"
-        },
-        "ghostline.disabledLanguages": {
-          "type": "array",
-          "items": {
-            "type": "string"
+    "configuration": [
+      {
+        "title": "ghostline",
+        "order": 1,
+        "properties": {
+          "ghostline.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Activa o desactiva ghostline.",
+            "order": 1
           },
-          "default": [
-            "markdown",
-            "plaintext"
-          ],
-          "description": "Identificadores de lenguaje en los que no se sugiere automáticamente. Los de un área de trabajo se suman a los tuyos."
-        },
-        "ghostline.excludePatterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "ghostline.model": {
+            "type": "string",
+            "default": "haiku",
+            "scope": "application",
+            "enum": [
+              "haiku",
+              "sonnet",
+              "opus"
+            ],
+            "enumDescriptions": [
+              "El más barato. Acierta la mayoría de las veces; cuando razona tarda 1,5–3 s.",
+              "Más regular y más rápido (~1 s, sin pararse a razonar). Unas 12 veces más caro por petición.",
+              "El más capaz y el más caro. Para autocompletar no compensa."
+            ],
+            "description": "Modelo de Claude que genera las sugerencias.",
+            "order": 2
           },
-          "default": [
-            "**/.env",
-            "**/.env.*",
-            "**/*.pem",
-            "**/*.key",
-            "**/*.p12",
-            "**/*.pfx",
-            "**/id_rsa*",
-            "**/id_ed25519*",
-            "**/*secret*",
-            "**/*credential*",
-            "**/.npmrc",
-            "**/.pypirc",
-            "**/.netrc",
-            "**/.aws/**",
-            "**/.ssh/**",
-            "**/*.kdbx",
-            "**/*secret*/**",
-            "**/*credential*/**",
-            "**/.git-credentials",
-            "**/.gnupg/**",
-            "**/.kube/**",
-            "**/.docker/config.json",
-            "**/*.tfvars",
-            "**/*.tfstate",
-            "**/*.tfstate.*",
-            "**/*.jks",
-            "**/*.keystore",
-            "**/.htpasswd"
-          ],
-          "description": "Patrones glob de archivos sensibles: nunca se sugiere en ellos, nunca se envían como contexto y nunca se guarda feedback. Los patrones de un área de trabajo se suman a estos; nunca los sustituyen."
-        },
-        "ghostline.workerMode": {
-          "type": "string",
-          "enum": [
-            "single-use",
-            "persistent"
-          ],
-          "enumDescriptions": [
-            "Cada sugerencia usa un proceso nuevo ya precalentado: sin historial y con coste constante.",
-            "Un proceso de larga duración cuya conversación se recicla cada ghostline.recycleEvery peticiones."
-          ],
-          "default": "single-use",
-          "description": "Cómo se gestionan los procesos de la CLI.",
-          "scope": "application"
-        },
-        "ghostline.recycleEvery": {
-          "type": "number",
-          "default": 8,
-          "minimum": 1,
-          "description": "En modo persistent, número de peticiones tras las que se recicla el proceso.",
-          "scope": "application"
-        },
-        "ghostline.promptCache": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "on",
-            "off"
-          ],
-          "enumDescriptions": [
-            "Desactivada en single-use (cada prompt es único y escribir en caché cuesta el doble) y activada en persistent.",
-            "Siempre activada (comportamiento por defecto de la CLI).",
-            "Siempre desactivada (DISABLE_PROMPT_CACHING=1)."
-          ],
-          "default": "auto",
-          "description": "Caché de prompts de la API en los procesos de la CLI.",
-          "scope": "application"
-        },
-        "ghostline.context.prefixLines": {
-          "type": "number",
-          "default": 60,
-          "minimum": 5,
-          "description": "Líneas anteriores al cursor que se envían como máximo (además se recortan al presupuesto de tokens). Un área de trabajo solo puede hacerlo más restrictivo."
-        },
-        "ghostline.context.suffixLines": {
-          "type": "number",
-          "default": 20,
-          "minimum": 0,
-          "description": "Líneas posteriores al cursor que se envían como máximo. Un área de trabajo solo puede hacerlo más restrictivo."
-        },
-        "ghostline.context.symbols": {
-          "type": "boolean",
-          "default": true,
-          "description": "Añade al prompt la declaración de hasta 3 símbolos de la línea actual o de la línea que abrió la llamada o el literal en el que estás, localizada con el servidor de lenguaje: la línea de firma y, para un struct, interfaz, tipo objeto o enum de este proyecto, también sus campos (nombres y tipos, nunca valores). Es lo único que se envía de archivos distintos del actual; nunca de archivos excluidos. Comparte presupuesto con el contexto del archivo. Desactívalo para enviar solo el archivo actual.",
-          "scope": "application"
-        },
-        "ghostline.learning.examples": {
-          "type": "boolean",
-          "default": false,
-          "description": "Guarda en local (solo en este equipo) las sugerencias que aceptas y siguen en el archivo 10 minutos después, y envía hasta 2 parecidas como ejemplo en cada petición (~300 tokens como máximo). Desactivado por defecto desde la v0.9: medido sobre llamadas reales, el modelo copiaba la forma del ejemplo en vez de la declaración que tenía delante, y son ~240 tokens más por petición.",
-          "scope": "application"
-        },
-        "ghostline.learning.adaptiveTrigger": {
-          "type": "boolean",
-          "default": true,
-          "description": "Deja de sugerir automáticamente durante 24 h en los contextos (lenguaje + posición del cursor) donde aceptas menos del 10 % de las últimas 40 sugerencias. El modo manual no se ve afectado.",
-          "scope": "application"
-        },
-        "ghostline.debug.logPrompts": {
-          "type": "boolean",
-          "default": false,
-          "description": "Escribe en el log los prompts completos y las respuestas. Desactivado por defecto por privacidad.",
-          "scope": "application"
+          "ghostline.triggerMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "default": "auto",
+            "enumDescriptions": [
+              "Sugiere solo al dejar de teclear.",
+              "Solo sugiere cuando lo pides con el atajo (Alt+\\, en teclado español Alt+ç)."
+            ],
+            "description": "Cuándo se piden sugerencias.",
+            "order": 3
+          },
+          "ghostline.debounceMs": {
+            "type": "number",
+            "default": 600,
+            "minimum": 0,
+            "description": "Milisegundos que hay que dejar de teclear para que se pida una sugerencia. Más alto: menos peticiones que se quedan sin usar.",
+            "order": 4
+          },
+          "ghostline.dailyRequestLimit": {
+            "type": "number",
+            "default": 1500,
+            "minimum": 0,
+            "scope": "application",
+            "description": "Tope de peticiones al día. Al alcanzarlo se pausan las sugerencias automáticas (el atajo sigue funcionando). 0 = sin tope.",
+            "order": 5
+          },
+          "ghostline.context.symbols": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "description": "Enviar también declaraciones de otros archivos del proyecto (firmas de funciones y campos de tipos; nunca valores ni archivos excluidos), para que las sugerencias usen lo que existe en vez de inventárselo. Desactívalo para enviar solo el archivo actual.",
+            "order": 6
+          },
+          "ghostline.disabledLanguages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "markdown",
+              "plaintext"
+            ],
+            "description": "Lenguajes en los que no se sugiere automáticamente.",
+            "order": 7
+          },
+          "ghostline.excludePatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/.env",
+              "**/.env.*",
+              "**/*.pem",
+              "**/*.key",
+              "**/*.p12",
+              "**/*.pfx",
+              "**/id_rsa*",
+              "**/id_ed25519*",
+              "**/*secret*",
+              "**/*credential*",
+              "**/.npmrc",
+              "**/.pypirc",
+              "**/.netrc",
+              "**/.aws/**",
+              "**/.ssh/**",
+              "**/*.kdbx",
+              "**/*secret*/**",
+              "**/*credential*/**",
+              "**/.git-credentials",
+              "**/.gnupg/**",
+              "**/.kube/**",
+              "**/.docker/config.json",
+              "**/*.tfvars",
+              "**/*.tfstate",
+              "**/*.tfstate.*",
+              "**/*.jks",
+              "**/*.keystore",
+              "**/.htpasswd"
+            ],
+            "description": "Archivos sensibles (patrones glob): nunca se sugiere en ellos ni se envía nada suyo.",
+            "order": 8
+          }
+        }
+      },
+      {
+        "title": "Avanzado",
+        "order": 2,
+        "properties": {
+          "ghostline.cliPath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Ruta al ejecutable de Claude Code. Vacío: se busca `claude` en el `PATH`.",
+            "order": 1
+          },
+          "ghostline.effort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default": "medium",
+            "scope": "application",
+            "description": "Esfuerzo que se pide al modelo. «medium» es el que mejor salió en las pruebas; «low» acierta menos y «high» tarda más sin acertar más.",
+            "order": 2
+          },
+          "ghostline.reasoning": {
+            "type": "string",
+            "enum": [
+              "minimal",
+              "adaptive"
+            ],
+            "default": "adaptive",
+            "scope": "application",
+            "enumDescriptions": [
+              "Responder sin razonar: más rápido, acierta bastante menos.",
+              "El modelo decide cuándo razonar (recomendado)."
+            ],
+            "description": "Si el modelo puede pararse a razonar antes de sugerir.",
+            "order": 3
+          },
+          "ghostline.midLine": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "description": "Sugerir también en mitad de una línea, justo donde acabas de teclear (por ejemplo, delante de una llamada ya escrita).",
+            "order": 4
+          },
+          "ghostline.maxLines": {
+            "type": "number",
+            "default": 6,
+            "minimum": 1,
+            "description": "Líneas que puede tener una sugerencia como máximo.",
+            "order": 5
+          },
+          "ghostline.speculation": {
+            "type": "string",
+            "enum": [
+              "off",
+              "line"
+            ],
+            "default": "off",
+            "scope": "application",
+            "enumDescriptions": [
+              "Solo se pide tras una pausa completa. Es lo que menos gasta.",
+              "Se adelanta en cada línea nueva y tras aceptar: menos espera, casi el doble de tokens."
+            ],
+            "description": "Si ghostline se adelanta a tu pausa.",
+            "order": 6
+          },
+          "ghostline.requestTimeoutMs": {
+            "type": "number",
+            "default": 8000,
+            "minimum": 1000,
+            "scope": "application",
+            "description": "Milisegundos que se espera una respuesta antes de abandonarla.",
+            "order": 7
+          },
+          "ghostline.claudeSessionUsd": {
+            "type": "number",
+            "default": 80,
+            "minimum": 1,
+            "scope": "application",
+            "description": "Lo que vale una sesión de Claude (5 h) de tu plan en dólares de API; solo sirve para el segundo porcentaje de la barra de estado. Cámbialo si cambias de plan.",
+            "order": 8
+          },
+          "ghostline.context.prefixLines": {
+            "type": "number",
+            "default": 60,
+            "minimum": 5,
+            "description": "Líneas anteriores al cursor que se envían como máximo.",
+            "order": 9
+          },
+          "ghostline.context.suffixLines": {
+            "type": "number",
+            "default": 20,
+            "minimum": 0,
+            "description": "Líneas posteriores al cursor que se envían como máximo.",
+            "order": 10
+          },
+          "ghostline.learning.adaptiveTrigger": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "description": "Dejar de sugerir 24 h en los sitios (lenguaje y posición del cursor) donde casi nunca aceptas.",
+            "order": 11
+          },
+          "ghostline.learning.examples": {
+            "type": "boolean",
+            "default": false,
+            "scope": "application",
+            "description": "Enviar como ejemplo sugerencias que aceptaste antes. En las pruebas empeoró el resultado; desactivado por defecto.",
+            "order": 12
+          },
+          "ghostline.debug.logPrompts": {
+            "type": "boolean",
+            "default": false,
+            "scope": "application",
+            "description": "Escribir en el log los prompts completos y las respuestas (incluye código del archivo).",
+            "order": 13
+          }
         }
       }
-    },
+    ],
     "keybindings": [
       {
         "command": "editor.action.inlineSuggest.trigger",
