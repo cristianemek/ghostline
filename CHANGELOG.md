@@ -6,8 +6,8 @@
   accesos directos (pausar, cambiar de modo, consumo, últimas sugerencias, ajustes).
 - Con API key, la barra y el popup muestran lo gastado hoy en lugar de la parte de la sesión. El aviso de
   que se factura por uso pasa a ser informativo y se da una sola vez.
-- Licencia MIT y aviso legal. ghostline se presenta como lo que es: una extensión que usa la CLI de tu
-  agente de IA (de momento, Claude Code), con API key como vía recomendada.
+- Licencia MIT. ghostline se presenta como lo que es: una extensión que usa la CLI de tu agente de IA
+  (de momento, Claude Code), con la sesión que tengas en ella.
 - Colores del icono alineados con los del popup.
 
 ## 0.13.1

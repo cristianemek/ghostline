@@ -6,19 +6,17 @@ tengas configurada en ella.
 
 De momento funciona con un solo agente: la CLI de [Claude Code](https://claude.com/claude-code).
 
-![ghostline completando código en Go, React y Laravel](docs/demo.gif)
+<p align="center">
+  <img src="docs/demo.gif" alt="ghostline completando código en Go, React y Laravel" width="486">
+</p>
 
 ## Requisitos
 
 - VS Code 1.144 o posterior.
 - Claude Code instalado y autenticado.
 
-**Recomendado: con una API key.** Es la vía que Anthropic indica para las herramientas de terceros. Inicia
-sesión en Claude Code con tu cuenta de la Claude Console o define `ANTHROPIC_API_KEY` en el entorno desde
-el que abres VS Code; cada sugerencia se factura por uso.
-
-ghostline usa la sesión que tenga la CLI, sea cual sea, así que también funciona con la de un plan de pago.
-Si es tu caso, comprueba antes que los términos de tu plan lo permiten: esa decisión es tuya.
+No hay nada más que configurar: ghostline usa la sesión que ya tenga la CLI, sea la de tu plan o una API
+key (con API key, cada sugerencia se factura por uso y la barra de estado muestra lo gastado).
 
 ## Instalación
 

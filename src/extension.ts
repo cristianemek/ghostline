@@ -488,8 +488,8 @@ class Ghostline implements vscode.Disposable {
   }
 
   /**
-   * With an API key (the recommended way to use ghostline) every suggestion is billed by use. That
-   * is worth knowing before the first one, and worth saying once: until the user has read it.
+   * With an API key every suggestion is billed by use. That is worth knowing before the first one,
+   * and worth saying once: until the user has read it.
    */
   private noteApiKey(source: string): void {
     if (this.warnedKeySources.has(source)) return;
