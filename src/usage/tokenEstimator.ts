@@ -3,7 +3,7 @@
  *
  *   input tokens ≈ overhead + characters / charsPerToken
  *
- * The defaults were measured with claude-haiku-5-5 on TypeScript (docs/paso-0.md, docs/fase-1.md):
+ * The defaults come from measurements on TypeScript:
  * the CLI adds ~600 tokens to every request, the system prompt and the prompt wrapper ~400 more, and
  * code tokenizes at 2.4-2.9 characters per token (not the 3.5 one would guess). Other languages and
  * models differ, so the estimate keeps adjusting itself with an exponentially weighted least-squares fit.

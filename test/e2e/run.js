@@ -31,6 +31,10 @@ const workspace = path.join(root, 'workspace');
 const resultFile = path.join(root, 'result.json');
 fs.mkdirSync(path.join(workspace, 'src'), { recursive: true });
 fs.mkdirSync(path.join(workspace, '.vscode'), { recursive: true });
+// A repository can bring Claude Code settings of its own. The CLI obeys the ones in its working
+// folder, so it must never be launched here: these would send every request to another server.
+fs.mkdirSync(path.join(workspace, '.claude'), { recursive: true });
+fs.writeFileSync(path.join(workspace, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:1' } }));
 fs.writeFileSync(
   path.join(workspace, 'src', 'sample.ts'),
   [
@@ -65,7 +69,7 @@ fs.writeFileSync(
     '',
   ].join('\n'),
 );
-// Phase 3: a symbol defined in another file, and one defined in a file that is excluded.
+// A symbol defined in another file, and one defined in a file that is excluded.
 fs.writeFileSync(
   path.join(workspace, 'src', 'lib.ts'),
   [

@@ -114,7 +114,7 @@ const MARKUP_LANGUAGES = new Set([
 ]);
 
 /**
- * "ctx, conversationID</parameter>": a closing tag left over from the model's own answer format. Where
+ * "first, second</parameter>": a closing tag left over from the model's own answer format. Where
  * tags are not code, and nothing in the completion opens it, it goes.
  */
 function removeStrayClosingTag(text: string, languageId: string | undefined): string {
@@ -178,7 +178,7 @@ export function stripCodeFences(text: string, lineContent = ''): string {
 const GO_NAMED_LITERAL = /(?:^|[^\w\][.*])[A-Za-z_][\w.]*\{$/;
 
 /**
- * "…CreateMessageParams{" + "{ConversationID: id, …}": the model wrote again the brace the cursor
+ * "…OrderParams{" + "{ID: id, …}": the model wrote again the brace the cursor
  * comes right after. In a literal of a named type nothing can start with another brace, so it goes;
  * the matching closer is left to the suffix check. (In "[]Item{" a second brace opens an element.)
  */
@@ -225,7 +225,7 @@ const SELF_TALK = new RegExp(
     // An ellipsis followed by plain words is a sentence; in code "..." is glued to a name or stands alone.
     String.raw`(?:\.{3}|…)\s+[a-z]+[;,:]?\s+[a-z]+\s+[a-z]+`,
     String.raw`\bwait\s*[—–]`,
-    // slog.Error("log slog.Error"? No —
+    // log.Error("request failed"? No —
     String.raw`\?\s*no\b\s*[—–.;]`,
     String.raw`\bno\s*[—–]`,
     String.raw`\bno[,;] the\b`,
@@ -237,9 +237,8 @@ const AFTERTHOUGHT = /\bthe (?:completion|answer|cursor) (?:should|is|would|must
 
 /**
  * The model talking to itself in the middle of an answer means it is doubting what it has just
- * written, so nothing of that answer is offered. (The part before the doubt used to be kept; in real
- * use it was a draft the model was about to take back: `slog.Error("log slog.Error"? No —`.) A plain
- * description after the code is only cut off. Inside a comment, or a string of the completion
+ * written, so nothing of that answer is offered: the part before the doubt is a draft it is about
+ * to take back. A plain description after the code is only cut off. Inside a comment, or a string of the completion
  * ("loading ... please wait a bit"), the same words are text.
  */
 function cutAtSelfTalk(text: string, prefix: string, lineContent: string): string {
@@ -403,7 +402,7 @@ function startsWithCloser(line: string): boolean {
 
 /**
  * Re-bases the indentation of every line after the first on the current line. The model's absolute
- * indentation is unreliable (it was measured to be off by a level), but its relative structure is fine.
+ * indentation is unreliable (often off by a level), but its relative structure is fine.
  */
 function reindent(text: string, linePrefix: string, style: IndentStyle): string {
   const lines = text.split('\n');
@@ -508,7 +507,10 @@ export function trimAgainstSuffix(text: string, prefix: string, suffix: string, 
  * the model doubting itself, the "nothing to do" marker).
  */
 export function cleanBlock(raw: string, languageId?: string): string {
-  let text = stripCodeFences(raw.replace(/\r\n?/g, '\n')).replace(/<\/?region>/g, '');
+  let text = stripCodeFences(raw.replace(/\r\n?/g, '\n'));
+  // The tags of the request around the whole answer; anywhere else <region> may be the code's own.
+  const wrapped = /^\s*<region>\n?([\s\S]*?)\n?<\/region>\s*$/.exec(text);
+  if (wrapped) text = wrapped[1] ?? '';
   if (PROMPT_ECHO.test(text) || isChatter(text, '')) return '';
   if (!(languageId && PROSE_LANGUAGES.has(languageId))) text = cutAtSelfTalk(text, '', '');
   text = cutAtProse(text, '', '', languageId);
@@ -517,7 +519,7 @@ export function cleanBlock(raw: string, languageId?: string): string {
 
 /**
  * With the cursor in the middle of a line the model is asked for the whole line as it should read,
- * which it gets right far more often than the bare insertion (measured: docs/acierto.md). Returns
+ * which it gets right far more often than the bare insertion. Returns
  * what must be inserted at the cursor to turn the current line into that one, or '' when the answer
  * does not keep what is on both sides of the cursor: that would be an edit, not a completion.
  */
@@ -628,7 +630,7 @@ export function postprocess(input: PostprocessInput): string {
   if (!text.includes('\n') && rest.trim() !== '' && rest.trimStart().startsWith(text.trim())) return '';
 
   // In front of more code on the same line the separating space is part of the completion:
-  // "conversation, |c.run()" + "err := ". Kept when the model wrote it, added after a comma or an
+  // "order, |store.run()" + "err := ". Kept when the model wrote it, added after a comma or an
   // operator that the line writes with spaces around it.
   const codeFollows = !text.includes('\n') && rest !== '' && !/^[\s)\]}.,;:]/.test(rest);
   if (codeFollows && (spaceAtEnd || SPACED_END.test(linePrefix + text))) return text + ' ';

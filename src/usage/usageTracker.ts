@@ -62,8 +62,8 @@ const STORE_KEY = 'ghostline.usage.v1';
 const SPEND_KEY = 'ghostline.spend.v1';
 const SPEND_BUCKET_MS = 15 * 60_000;
 const SPEND_KEEP_MS = 8 * 24 * 3600_000;
-/** A typical completion (≈1.900 tokens of Haiku), for pricing a cut-off request before any has been measured. */
-const FALLBACK_USD_PER_INPUT_TOKEN = 0.00025 / 1900;
+/** A typical completion with the default model (≈1.900 input tokens), for pricing a cut-off request before any has been measured. */
+const FALLBACK_USD_PER_INPUT_TOKEN = 0.0045 / 1900;
 const KEEP_DAYS = 30;
 const MAX_SAMPLES_PER_DAY = 400;
 const COUNTERS = [

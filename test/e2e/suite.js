@@ -48,8 +48,8 @@ async function run() {
   await step('seguridad: los ajustes que trae un repositorio no pueden hacer que ghostline envíe o gaste más', async () => {
     // .vscode/settings.json of this workspace sets hostile values for all of these (see run.js).
     const config = api.config();
-    assert.equal(config.model, 'haiku');
-    assert.equal(config.effort, 'medium');
+    assert.equal(config.model, 'sonnet');
+    assert.equal(config.effort, 'low');
     assert.equal(config.dailyRequestLimit, 1500);
     assert.equal(config.logPrompts, false);
     assert.equal(config.symbolContext, false);
@@ -63,8 +63,25 @@ async function run() {
     assert.ok(config.disabledLanguages.includes('markdown'));
     // The user switched the project context off; the repository asks for it and gets nothing.
     assert.ok(!(await api.systemPrompt()).includes('<project>'), 'el índice del proyecto se activó desde el repositorio');
-    // A setting that is no longer listed in the Settings UI is still read from the user's settings.
+    // A setting that is not listed in the Settings UI is still read from the user's settings.
     assert.equal(config.recycleEvery, 5);
+  });
+
+  await step('seguridad: la CLI se lanza en una carpeta vacía de ghostline, nunca en el proyecto', async () => {
+    // The CLI obeys a .claude/settings.json in its working folder, and this workspace brings one
+    // that points it at another server (see run.js).
+    const fs = require('fs');
+    const path = require('path');
+    const marker = 'carpeta de trabajo de la CLI: ';
+    const line = api.logLines().find((entry) => entry.includes(marker));
+    assert.ok(line, 'el log no dice dónde se lanza la CLI');
+    const cwd = line.slice(line.indexOf(marker) + marker.length).trim();
+    const project = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    assert.ok(fs.existsSync(path.join(project, '.claude', 'settings.json')), 'falta el archivo plantado');
+    const fromProject = path.relative(project, cwd);
+    assert.ok(fromProject.startsWith('..') || path.isAbsolute(fromProject), `la CLI se lanza dentro del proyecto: ${cwd}`);
+    assert.ok(cwd.toLowerCase().includes(path.join('globalstorage', 'cristianemek.ghostline')), `fuera del almacenamiento del usuario: ${cwd}`);
+    assert.deepEqual(fs.readdirSync(cwd), []);
   });
 
   const sample = await open('src/sample.ts');
@@ -251,7 +268,7 @@ async function run() {
     assert.ok(api.logLines().some((line) => line.includes('apiKeySource none')));
   });
 
-  // --- Fase 2 -----------------------------------------------------------------------------------
+  // --- Aprendizaje ------------------------------------------------------------------------------
 
   const lastPrompt = () => {
     const lines = api.logLines().filter((line) => / prompt \(\d+ caracteres/.test(line));
@@ -309,7 +326,7 @@ async function run() {
     assert.ok(prompt.includes('<examples>'), 'el prompt no lleva ejemplos');
     assert.ok(prompt.includes('<accepted>a + b;</accepted>'), 'falta el texto aceptado');
     assert.ok(prompt.includes('orderService.list(filters);'), 'falta el contexto del ejemplo');
-    // The examples come before the file, as the spec orders the blocks.
+    // The examples come before the file.
     assert.ok(prompt.indexOf('<examples>') < prompt.indexOf('<file path='));
     await setting('learning.examples', false);
   });
@@ -575,7 +592,7 @@ async function run() {
     }
   });
 
-  // --- Fase 3 -----------------------------------------------------------------------------------
+  // --- Contexto de símbolos ---------------------------------------------------------------------
 
   await step('símbolos: la firma de una definición de otro archivo llega al prompt; de un archivo excluido, nunca', async () => {
     await setting('context.symbols', true);

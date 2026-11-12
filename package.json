@@ -1,9 +1,20 @@
 {
   "name": "ghostline",
   "displayName": "ghostline",
-  "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.11.0",
+  "description": "Autocompletado inline (texto fantasma) con Claude, a través de la CLI de Claude Code que ya tienes instalada.",
+  "version": "0.12.0",
   "icon": "resources/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
+  "keywords": [
+    "claude",
+    "claude code",
+    "autocomplete",
+    "inline completion",
+    "ghost text"
+  ],
   "private": true,
   "publisher": "cristianemek",
   "license": "UNLICENSED",
@@ -15,6 +26,7 @@
     "vscode": "^1.144.0"
   },
   "categories": [
+    "AI",
     "Other"
   ],
   "main": "./dist/extension.js",
@@ -24,7 +36,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "ghostline lanza la CLI de Claude Code y envía fragmentos del archivo abierto; solo funciona en áreas de trabajo de confianza."
+      "description": "ghostline lanza la CLI de Claude Code y envía a Anthropic fragmentos del archivo abierto; solo funciona en áreas de trabajo de confianza."
     },
     "virtualWorkspaces": {
       "supported": false,
@@ -107,7 +119,7 @@
           },
           "ghostline.model": {
             "type": "string",
-            "default": "haiku",
+            "default": "sonnet",
             "scope": "application",
             "enum": [
               "haiku",
@@ -115,8 +127,8 @@
               "opus"
             ],
             "enumDescriptions": [
-              "El más barato. Acierta la mayoría de las veces; cuando razona tarda 1,5–3 s.",
-              "Más regular y más rápido (~1 s, sin pararse a razonar). Unas 12 veces más caro por petición.",
+              "El más barato (unas 12 veces menos por petición), pero más lento: se para a razonar (2–3 s). Con él, sube «ghostline.effort» a «medium».",
+              "Rápido (~1 s) y regular. El recomendado.",
               "El más capaz y el más caro. Para autocompletar no compensa."
             ],
             "description": "Modelo de Claude que genera las sugerencias.",
@@ -237,9 +249,9 @@
               "xhigh",
               "max"
             ],
-            "default": "medium",
+            "default": "low",
             "scope": "application",
-            "description": "Esfuerzo que se pide al modelo. «medium» es el que mejor salió en las pruebas; «low» acierta menos y «high» tarda más sin acertar más.",
+            "description": "Esfuerzo que se pide al modelo. «low» basta con Sonnet y es lo más rápido; con Haiku, «medium» acierta bastante más. Por encima solo tarda más.",
             "order": 2
           },
           "ghostline.reasoning": {
@@ -327,7 +339,7 @@
             "type": "boolean",
             "default": false,
             "scope": "application",
-            "description": "Enviar como ejemplo sugerencias que aceptaste antes. En las pruebas empeoró el resultado; desactivado por defecto.",
+            "description": "Enviar como ejemplo sugerencias que aceptaste antes y conservaste. Puede hacer que el modelo copie la forma del ejemplo; desactivado por defecto.",
             "order": 12
           },
           "ghostline.debug.logPrompts": {
@@ -370,7 +382,7 @@
     "bench:typing": "node esbuild.mjs && node test/e2e/run.js --typing",
     "check": "npm run typecheck && npm run lint && npm test",
     "vscode:prepublish": "npm run build:prod",
-    "package": "vsce package --no-dependencies --skip-license --no-rewrite-relative-links",
+    "package": "vsce package --no-dependencies --skip-license",
     "audit": "npm audit --audit-level=low"
   },
   "devDependencies": {

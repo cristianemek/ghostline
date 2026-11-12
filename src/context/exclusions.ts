@@ -1,15 +1,15 @@
 /**
- * Sensitive-file filter. The extension checks documents with `vscode.languages.match` (as the spec
- * asks) AND with this dependency-free matcher, and treats a file as excluded when either says so.
+ * Sensitive-file filter. The extension checks documents with `vscode.languages.match` AND with
+ * this dependency-free matcher, and treats a file as excluded when either says so.
  * This matcher also covers the places where there is only a path and no TextDocument.
  *
  * The matcher never builds a regular expression from a pattern: patterns can come from workspace
- * settings, and a crafted glob turned into nested ".*" groups freezes the editor (measured: six
- * double-star segments took a second per file, ten never finished). Matching here is plain loops
+ * settings, and a crafted glob turned into nested ".*" groups can freeze the editor (six
+ * double-star segments take a second per file, ten never finish). Matching here is plain loops
  * with memoisation, linear in pattern x path.
  */
 export const DEFAULT_EXCLUDE_PATTERNS: readonly string[] = [
-  // The spec's list.
+  // Secrets and keys.
   '**/.env',
   '**/.env.*',
   '**/*.pem',

@@ -5,8 +5,8 @@ import { buildFixPrompt, diffLines, fixRegion, hunkPreview, parseFix } from '../
 
 // The case that prompted this: a snippet left with its placeholders.
 const file = [
-  'func (c *core) finishMessage(ctx context.Context, messageID pgtype.UUID, content json.RawMessage, streamErr error) {',
-  '\tstatus := gen.MessageStatusCompleted',
+  'func (c *core) finishOrder(ctx context.Context, itemID pgtype.UUID, content json.RawMessage, cause error) {',
+  '\tstatus := gen.OrderStatusCompleted',
   '',
   '\tswitch expression {',
   '\tcase condition:',
@@ -27,7 +27,7 @@ test('fix: the region is the statement the errors are in, closed where its brack
   assert.equal(fixRegion(lineAt, file.length, [{ line: 40, message: 'x' }], 3), undefined);
   assert.equal(fixRegion(lineAt, file.length, [], 3), undefined);
   // One line with its brackets balanced is its own region.
-  const call = ['\trows, err := c.queries.ListContextMessages(ctx, conversationID, nil)', '\tif err != nil {', '\t}'];
+  const call = ['\trows, err := c.queries.ListOrderItems(ctx, orderID, nil)', '\tif err != nil {', '\t}'];
   assert.deepEqual(fixRegion((line) => call[line] as string, call.length, [{ line: 0, message: 'too many arguments' }], 0), { startLine: 0, endLine: 0 });
   // Brackets inside strings and comments do not count.
   const text = ['\tlog("open ( never closed") // {', '\tnext()'];
@@ -61,8 +61,8 @@ test('fix: the prompt marks the region where the cursor would be and lists the e
   assert.equal(
     built.text,
     '<file path="api/core.go" language="go">\n' +
-      '<prefix>func (c *core) finishMessage(ctx context.Context, messageID pgtype.UUID, content json.RawMessage, streamErr error) {\n' +
-      '\tstatus := gen.MessageStatusCompleted\n\n</prefix><region>\n' +
+      '<prefix>func (c *core) finishOrder(ctx context.Context, itemID pgtype.UUID, content json.RawMessage, cause error) {\n' +
+      '\tstatus := gen.OrderStatusCompleted\n\n</prefix><region>\n' +
       '\tswitch expression {\n\tcase condition:\n\n\t}\n' +
       '</region><suffix>\n}</suffix>\n</file>\n' +
       '<fix>\nThe compiler reports, inside <region>:\n- line 1: undefined: expression\n- line 2: undefined: condition\n- line 1: second line\n</fix>\n' +
@@ -73,7 +73,7 @@ test('fix: the prompt marks the region where the cursor would be and lists the e
 
 test('fix: the answer becomes the new lines of the region, or nothing when it is not a correction', () => {
   const original = file.slice(3, 7);
-  const fixed = ['\tswitch {', '\tcase streamErr != nil:', '\t\tstatus = gen.MessageStatusFailed', '\t}'];
+  const fixed = ['\tswitch {', '\tcase cause != nil:', '\t\tstatus = gen.OrderStatusFailed', '\t}'];
   assert.deepEqual(parseFix(fixed.join('\n'), original, 'go'), fixed);
   // Wrapped in a fence or in the region tags, answered from the left margin, with trailing spaces.
   assert.deepEqual(parseFix('```go\n' + fixed.join('\n') + '\n```', original, 'go'), fixed);
@@ -87,22 +87,22 @@ test('fix: the answer becomes the new lines of the region, or nothing when it is
   assert.equal(parseFix(Array.from({ length: 30 }, (_, i) => `\tstep${i}()`).join('\n'), original, 'go'), undefined);
   assert.equal(parseFix('', original, 'go'), undefined);
   // Seen with the real CLI: a rewrite that leaves a bracket open, and fragments of the line instead of the line.
-  assert.equal(parseFix('\tswitch {\n\tcase streamErr != nil:', original, 'go'), undefined);
-  const call = ['\trows, err := c.queries.ListContextMessages(ctx, conversationID, nil)'];
-  assert.equal(parseFix('ctx, conversationID, nil)', call, 'go'), undefined);
-  assert.equal(parseFix('ListContextMessages(ctx, conversationID)', call, 'go'), undefined);
-  assert.equal(parseFix('ld, err := c.queries.ListContextMessages(ctx, conversationID)', call, 'go'), undefined);
-  assert.deepEqual(parseFix('rows, err := c.queries.ListContextMessages(ctx, conversationID)', call, 'go'), ['\trows, err := c.queries.ListContextMessages(ctx, conversationID)']);
+  assert.equal(parseFix('\tswitch {\n\tcase cause != nil:', original, 'go'), undefined);
+  const call = ['\trows, err := c.queries.ListOrderItems(ctx, orderID, nil)'];
+  assert.equal(parseFix('ctx, orderID, nil)', call, 'go'), undefined);
+  assert.equal(parseFix('ListOrderItems(ctx, orderID)', call, 'go'), undefined);
+  assert.equal(parseFix('ld, err := c.queries.ListOrderItems(ctx, orderID)', call, 'go'), undefined);
+  assert.deepEqual(parseFix('rows, err := c.queries.ListOrderItems(ctx, orderID)', call, 'go'), ['\trows, err := c.queries.ListOrderItems(ctx, orderID)']);
   // A typo at the very start of the line can still be corrected.
   assert.deepEqual(parseFix('\treturn total', ['\tretrun total'], 'go'), ['\treturn total']);
 });
 
 test('fix: the stretches that change, and how each one is shown', () => {
   const oldLines = ['\tswitch expression {', '\tcase condition:', '', '\t}'];
-  const newLines = ['\tswitch {', '\tcase streamErr != nil:', '\t\tstatus = gen.MessageStatusFailed', '\t}'];
+  const newLines = ['\tswitch {', '\tcase cause != nil:', '\t\tstatus = gen.OrderStatusFailed', '\t}'];
   const hunks = diffLines(oldLines, newLines);
-  assert.deepEqual(hunks, [{ oldStart: 0, oldCount: 3, newLines: ['\tswitch {', '\tcase streamErr != nil:', '\t\tstatus = gen.MessageStatusFailed'] }]);
-  assert.equal(hunkPreview(hunks[0] as (typeof hunks)[number]), 'switch { ⏎ case streamErr != nil: ⏎ status = gen.MessageStatusFailed');
+  assert.deepEqual(hunks, [{ oldStart: 0, oldCount: 3, newLines: ['\tswitch {', '\tcase cause != nil:', '\t\tstatus = gen.OrderStatusFailed'] }]);
+  assert.equal(hunkPreview(hunks[0] as (typeof hunks)[number]), 'switch { ⏎ case cause != nil: ⏎ status = gen.OrderStatusFailed');
 
   // One line of several changes: only that one.
   assert.deepEqual(diffLines(['a()', 'b(x, y, nil)', 'c()'], ['a()', 'b(x, y)', 'c()']), [{ oldStart: 1, oldCount: 1, newLines: ['b(x, y)'] }]);

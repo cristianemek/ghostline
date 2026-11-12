@@ -8,9 +8,9 @@ export type ReasoningMode = 'minimal' | 'adaptive';
 /**
  * How much ghostline bets on a suggestion being wanted before the user has clearly paused.
  * off: never; a request is only sent after a full pause. line: one bet per new line (short wait on
- * an empty line) and no wait right after accepting. A third level that also bet inside the line was
- * measured and dropped: more tokens, no gain. Either way a request that is already in the air is
- * kept while the typing agrees with its answer: it has been paid for.
+ * an empty line) and no wait right after accepting. Betting inside the line as well costs more
+ * tokens for no gain. Either way a request that is already in the air is kept while the typing
+ * agrees with its answer: it has been paid for.
  */
 export type Speculation = 'off' | 'line';
 
@@ -102,9 +102,9 @@ export function readConfig(): GhostlineConfig {
     // A workspace can switch ghostline off for itself, not back on.
     enabled: user('enabled') !== false && workspace('enabled').every((value) => value !== false),
     cliPath: String(user('cliPath') ?? ''),
-    model: SAFE_MODEL.test(model) ? model : 'haiku',
-    // "medium" since v0.9: on real calls it took Haiku from 7 to 14 right out of 16 for ~12 % more per request.
-    effort: oneOf(user('effort'), ['low', 'medium', 'high', 'xhigh', 'max'] as const, 'medium'),
+    model: SAFE_MODEL.test(model) ? model : 'sonnet',
+    // Enough for Sonnet, which answers without stopping to think; Haiku needs "medium" to respect declarations.
+    effort: oneOf(user('effort'), ['low', 'medium', 'high', 'xhigh', 'max'] as const, 'low'),
     // …and can ask for manual mode, not force automatic requests.
     triggerMode:
       oneOf(user('triggerMode'), ['auto', 'manual'] as const, 'auto') === 'manual' || workspace('triggerMode').includes('manual')
@@ -161,9 +161,7 @@ export function affectsGhostline(event: vscode.ConfigurationChangeEvent): boolea
 /**
  * Whether the API prompt cache stays on for the CLI processes. On unless switched off: the system
  * prompt (with the project index in it) is read back from the cache by every later process, and the
- * part unique to each request is written with the short lifetime (see `buildCliEnv` and
- * docs/consumo.md). When the system prompt was a few hundred tokens it was never read back and the
- * cache only cost money (docs/paso-0.md, finding 4), which is why it used to be off.
+ * part unique to each request is written with the short lifetime (see `buildCliEnv`).
  */
 export function promptCacheEnabled(config: GhostlineConfig): boolean {
   return config.promptCache !== 'off';

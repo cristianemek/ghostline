@@ -68,7 +68,7 @@ function fineShare(rate: number): string {
 /**
  * The part of a whole Claude session (the subscription's 5-hour window) that ghostline itself has
  * used. An estimate: Anthropic publishes no formula, so it is ghostline's spend at API prices over
- * what a session was measured to be worth (see docs/consumo.md), both on the high side.
+ * what a session is worth (`ghostline.claudeSessionUsd`), both on the high side.
  */
 function sessionShare(session: SessionInfo): string {
   return session.sessionBudgetUsd > 0 ? fineShare(session.sessionSpentUsd / session.sessionBudgetUsd) : '–';
@@ -89,9 +89,8 @@ export function usesApiKey(apiKeySource: string | undefined): boolean {
 
 /**
  * `ghostline 8% · Claude 0,03%`: how much of ghostline's own daily cap is used, and how much of a
- * whole Claude session ghostline has taken. (The spec asked for requests · tokens · acceptance; in
- * use, these two were the ones worth a glance. The rest is one click away, in the last-7-days list
- * and the log.)
+ * whole Claude session ghostline has taken. Tokens, latency and cost are one click away, in the
+ * last-7-days list and the log.
  */
 export function statusText(day: DayStats, session: SessionInfo): string {
   if (session.cliError) return '$(warning) ghostline: sin CLI';
@@ -140,7 +139,7 @@ export function tooltipLines(day: DayStats, session: SessionInfo): string[] {
   return lines;
 }
 
-/** The spec's threshold: above this median latency the user is told and offered adjustments. */
+/** Above this median latency the user is told and offered adjustments. */
 export const SLOW_P50_MS = 1500;
 
 /**

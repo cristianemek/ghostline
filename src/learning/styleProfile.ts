@@ -1,3 +1,5 @@
+import { withoutStructuralTags } from '../completion/promptBuilder';
+
 /** Pure helpers for the "learn the project's style" command. */
 
 export interface StyleCandidate {
@@ -25,10 +27,10 @@ const TEST_FILE = /(\.test\.|\.spec\.|_test\.|(^|\/)(tests?|__tests__|specs?|e2e
 export const MAX_PROFILE_CHARS = 700;
 /**
  * Budget for the file contents sent when learning the style. With the CLI's fixed overhead the whole
- * request comes to about 6k tokens, the spec's ceiling.
+ * request comes to about 6k tokens.
  */
 export const STYLE_INPUT_TOKENS = 5200;
-/** The heads of source files are dense code (measured: ~2.3 characters per token). */
+/** The heads of source files are dense code (~2.3 characters per token). */
 export const STYLE_CHARS_PER_TOKEN = 2.3;
 export const MAX_STYLE_FILES = 5;
 const IDEAL_FILE_BYTES = 4000;
@@ -135,9 +137,6 @@ export function cleanStyleGuide(raw: string, maxChars: number = MAX_PROFILE_CHAR
   return capProfile(lines.join('\n').replace(/\n{3,}/g, '\n\n').trim(), maxChars);
 }
 
-/** The tags that give the prompt its structure. */
-const STRUCTURAL_TAG = /<\/?(?:style|examples?|before|accepted|symbols|file|prefix|suffix|cursor)\b[^>]*>/gi;
-
 /**
  * Cuts a profile (possibly hand-edited) to the size that is sent, on a line boundary.
  *
@@ -146,7 +145,7 @@ const STRUCTURAL_TAG = /<\/?(?:style|examples?|before|accepted|symbols|file|pref
  * then on. Those tags are removed; the rest is plain text the user can read in the editor.
  */
 export function capProfile(text: string, maxChars: number = MAX_PROFILE_CHARS): string {
-  const trimmed = text.replace(STRUCTURAL_TAG, '').trim();
+  const trimmed = withoutStructuralTags(text).trim();
   if (trimmed.length <= maxChars) return trimmed;
   const cut = trimmed.slice(0, maxChars);
   const lastNewline = cut.lastIndexOf('\n');

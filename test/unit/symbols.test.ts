@@ -4,11 +4,11 @@ import { buildPrompt, DEFAULT_LIMITS } from '../../src/completion/promptBuilder'
 import { enclosingOpener, extractSignature, formatSymbols, pickIdentifiers, pickIdentifiersAfter } from '../../src/context/symbolText';
 
 test('identifiers after the cursor: nearest first, for an insertion in front of existing code', () => {
-  // Seen in real use: return values being named in front of a call that was already written.
-  const rest = ' c.queries.ListContextMessages(ctx, conversationID)';
+  // Return values being named in front of a call that was already written.
+  const rest = ' c.queries.ListOrderItems(ctx, orderID)';
   assert.deepEqual(pickIdentifiersAfter(rest), [
     { name: 'queries', character: rest.indexOf('queries') },
-    { name: 'ListContextMessages', character: rest.indexOf('ListContextMessages') },
+    { name: 'ListOrderItems', character: rest.indexOf('ListOrderItems') },
     { name: 'ctx', character: rest.indexOf('ctx') },
   ]);
   assert.deepEqual(
@@ -24,13 +24,13 @@ test('prompt: with code after the cursor on its line, the line is shown again wi
   const midLine = buildPrompt({
     path: 'api/core.go',
     languageId: 'go',
-    prefix: 'func run() {\n\tmessages',
-    suffix: ' c.queries.ListContextMessages(ctx, conversationID)\n}\n',
+    prefix: 'func run() {\n\titems',
+    suffix: ' c.queries.ListOrderItems(ctx, orderID)\n}\n',
     limits,
   });
-  assert.ok(midLine.text.endsWith('</file>\n<line>messages▮ c.queries.ListContextMessages(ctx, conversationID)</line>'), midLine.text.slice(-120));
+  assert.ok(midLine.text.endsWith('</file>\n<line>items▮ c.queries.ListOrderItems(ctx, orderID)</line>'), midLine.text.slice(-120));
   // …and the caller is told, so that it turns the whole line the model answers into an insertion.
-  assert.deepEqual(midLine.line, { before: 'messages', after: ' c.queries.ListContextMessages(ctx, conversationID)' });
+  assert.deepEqual(midLine.line, { before: 'items', after: ' c.queries.ListOrderItems(ctx, orderID)' });
   // At the end of the line, before closing characters, or on an empty line there is nothing to add.
   for (const [prefix, suffix] of [
     ['func run() {\n\tx := compute(', ')\n}\n'],
@@ -47,25 +47,25 @@ test('prompt: with code after the cursor on its line, the line is shown again wi
 });
 
 test('type declarations bring their members: names and types, never values', () => {
-  // The struct from the session that prompted this (sqlc output).
+  // The struct from the session that prompted this (generated output).
   const go = [
-    'type CreateConversationParams struct {',
-    '\tChannel      Channel',
-    '\tProfile      string',
-    '\tIdentityType IdentityType',
-    '\tIdentityID   string `json:"identity_id"`',
-    '\tOriginPage   pgtype.Text // nullable',
-    '\tTimezone     string',
+    'type CreateOrderParams struct {',
+    '\tKind      Kind',
+    '\tTier      string',
+    '\tCustomerType CustomerType',
+    '\tCustomerID   string `json:"identity_id"`',
+    '\tSource   pgtype.Text // nullable',
+    '\tCurrency     string',
     '}',
     '',
-    'func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error) {',
+    'func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Order, error) {',
   ];
   assert.equal(
     extractSignature(go, 0),
-    'type CreateConversationParams struct { Channel Channel; Profile string; IdentityType IdentityType; IdentityID string; OriginPage pgtype.Text; Timezone string }',
+    'type CreateOrderParams struct { Kind Kind; Tier string; CustomerType CustomerType; CustomerID string; Source pgtype.Text; Currency string }',
   );
   // Asked not to (a definition outside the workspace): the head only, as before.
-  assert.equal(extractSignature(go, 0, false), 'type CreateConversationParams struct');
+  assert.equal(extractSignature(go, 0, false), 'type CreateOrderParams struct');
 
   const ts = [
     'export interface ReportOptions extends Base {',
@@ -113,9 +113,9 @@ test('type declarations: only real type bodies, cut short when long', () => {
 });
 
 test('the call or literal the cursor is inside of, when it was opened further up', () => {
-  const call = '\t\tconversation, err := c.queries.CreateConversation(ctx, gen.CreateConversationParams{';
+  const call = '\t\torder, err := c.queries.CreateOrder(ctx, gen.CreateOrderParams{';
   assert.deepEqual(enclosingOpener([call], '\t\t\t'), { linesUp: 1, character: call.length - 1 });
-  assert.deepEqual(enclosingOpener([call, '\t\t\tChannel: in.Channel,', '\t\t\tProfile: pick(a, b),'], '\t\t\tTimezone: '), {
+  assert.deepEqual(enclosingOpener([call, '\t\t\tKind: in.Kind,', '\t\t\tTier: pick(a, b),'], '\t\t\tCurrency: '), {
     linesUp: 3,
     character: call.length - 1,
   });
@@ -123,10 +123,10 @@ test('the call or literal the cursor is inside of, when it was opened further up
   assert.deepEqual(enclosingOpener(['const options: ReportOptions = {'], '  '), { linesUp: 1, character: 31 });
   assert.deepEqual(enclosingOpener(['  return {'], '    '), { linesUp: 1, character: 9 });
   // Opened on the cursor's own line: nothing to add.
-  assert.equal(enclosingOpener([call], '\t\t\tOriginPage: pgtype.Text{String: '), undefined);
+  assert.equal(enclosingOpener([call], '\t\t\tSource: pgtype.Text{String: '), undefined);
   // A block of code is not a value being filled in.
   assert.equal(enclosingOpener(['  if (ready) {'], '    '), undefined);
-  assert.equal(enclosingOpener(['func (c *core) open(ctx context.Context) (gen.Conversation, error) {'], '\t'), undefined);
+  assert.equal(enclosingOpener(['func (c *core) open(ctx context.Context) (gen.Order, error) {'], '\t'), undefined);
   assert.equal(enclosingOpener(['  items.forEach((item) => {'], '    '), undefined);
   assert.equal(enclosingOpener(['export class Store {'], '  '), undefined);
   // Closed again before the cursor, or nothing open at all.

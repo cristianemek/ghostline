@@ -2,8 +2,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { endpointOverride } from './cli/args';
 import { resolveCli } from './cli/resolveCli';
 import type { InitInfo, RateLimitInfo } from './cli/streamParser';
+import { WORK_FOLDER_PREFIX, createWorkFolder, ensureEmptyWorkFolder, removeStaleWorkFolders } from './cli/workFolder';
 import { WorkerPool } from './cli/workerPool';
 import { ACCEPT_COMMAND, GhostlineProvider } from './completion/provider';
 import { typedInsertionEnd } from './completion/trigger';
@@ -31,11 +33,15 @@ import { TokenEstimator } from './usage/tokenEstimator';
 import { UsageTracker, type DayStats } from './usage/usageTracker';
 
 const CALIBRATION_KEY = 'ghostline.calibration.v1';
-const CWD_PREFIX = 'ghostline-cwd-';
+/** Inside the extension's global storage: where the CLI's working folders are created. */
+const WORK_FOLDERS = 'cli';
+const LEGACY_CWD_PREFIX = 'ghostline-cwd-';
 const STANDBY_MAX_IDLE_MS = 10 * 60_000;
 const FLUSH_INTERVAL_MS = 15_000;
 const CLI_RETRY_MS = 30_000;
 const SPEED_WARNING_KEY = 'ghostline.speedWarning.v1';
+/** The server other than Anthropic's that the user has said is theirs. */
+const ENDPOINT_ACK_KEY = 'ghostline.endpointAck.v1';
 /** Successful requests needed before today's median latency is worth acting on. */
 const MIN_REQUESTS_FOR_SPEED_WARNING = 20;
 
@@ -85,7 +91,8 @@ class Ghostline implements vscode.Disposable {
   private readonly warnedKeySources = new Set<string>();
   private readonly shownTroubles = new Set<string>();
   private refreshes = 0;
-  private readonly cwd: string;
+  /** Where the CLI runs: an empty folder of ghostline's own (see cli/workFolder.ts). */
+  private cwd: string;
   private readonly flushTimer: NodeJS.Timeout;
   private config: GhostlineConfig = readConfig();
   private pool: WorkerPool | null = null;
@@ -100,8 +107,8 @@ class Ghostline implements vscode.Disposable {
   constructor(private readonly context: vscode.ExtensionContext) {
     this.usage = new UsageTracker(context.globalState);
     this.estimator = new TokenEstimator(context.globalState.get(CALIBRATION_KEY));
-    this.cwd = fs.mkdtempSync(path.join(os.tmpdir(), CWD_PREFIX));
-    // Phase 2: everything ghostline learns stays in the editor's local storage.
+    this.cwd = createWorkFolder(path.join(context.globalStorageUri.fsPath, WORK_FOLDERS));
+    // Everything ghostline learns stays in the editor's local storage.
     this.examples = new ExampleStore(context.workspaceState);
     this.recent = new RecentSuggestions(context.workspaceState);
     this.indexer = new ProjectIndexer({ isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns) });
@@ -110,7 +117,7 @@ class Ghostline implements vscode.Disposable {
       context,
       getConfig: () => this.config,
       launcher: () => this.launcher(),
-      cwd: this.cwd,
+      cwd: () => this.cwd,
       charsPerToken: () => this.estimator.charsPerToken,
       usage: this.usage,
       log: (line) => this.log(line),
@@ -152,7 +159,7 @@ class Ghostline implements vscode.Disposable {
       learning: this.learning,
       journal: this.recent,
       projectContextChars: () => this.projectChars,
-      // Phase 3, unless "ghostline.context.symbols" is off.
+      // Unless "ghostline.context.symbols" is off.
       symbols: createSymbolProvider({
         isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns),
         charsPerToken: () => this.estimator.charsPerToken,
@@ -283,6 +290,19 @@ class Ghostline implements vscode.Disposable {
     // authenticates against the API instead of the subscription.
     for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) {
       if (process.env[name]) this.warnAboutApiKey(name);
+    }
+    this.warnAboutEndpoint();
+    try {
+      ensureEmptyWorkFolder(this.cwd);
+    } catch (error) {
+      // Something put files where the CLI runs, and the CLI obeys settings it finds there. It is
+      // never launched in that folder: a new one is made, and the user is told.
+      const detail = error instanceof Error ? error.message : String(error);
+      this.cwd = createWorkFolder(path.join(this.context.globalStorageUri.fsPath, WORK_FOLDERS));
+      this.log(`AVISO: ${detail}. Se usa una carpeta nueva: ${this.cwd}`);
+      void vscode.window.showWarningMessage(
+        `ghostline: ${detail}. Se usa una carpeta nueva; si no sabes qué ha escrito ahí, revísalo.`,
+      );
     }
     this.log(
       `CLI: ${resolved.command} (${resolved.source}) · modelo ${config.model} · effort ${config.effort} · ` +
@@ -469,6 +489,31 @@ class Ghostline implements vscode.Disposable {
       });
   }
 
+  /**
+   * With ANTHROPIC_BASE_URL in the editor's environment the CLI sends every request, and the login
+   * that goes with it, to that server instead of Anthropic's. Legitimate behind a company gateway;
+   * otherwise it is how a session gets stolen. Said once per server, until the user confirms it.
+   */
+  private warnAboutEndpoint(): void {
+    const host = endpointOverride(process.env);
+    if (!host || this.context.globalState.get<string>(ENDPOINT_ACK_KEY) === host) return;
+    const key = `endpoint:${host}`;
+    if (this.warnedKeySources.has(key)) return;
+    this.warnedKeySources.add(key);
+    this.log(`AVISO: ANTHROPIC_BASE_URL está definida: la CLI envía las peticiones y la sesión a ${host}, no a Anthropic.`);
+    void vscode.window
+      .showWarningMessage(
+        `ghostline: la variable de entorno ANTHROPIC_BASE_URL hace que la CLI de Claude Code envíe las peticiones, y tu sesión, a ${host} ` +
+          'en lugar de a Anthropic. Si no la has definido tú, pausa ghostline y revisa tu entorno.',
+        'Pausar ghostline',
+        'Es mi servidor',
+      )
+      .then((choice) => {
+        if (choice === 'Pausar ghostline' && !this.paused) this.togglePause();
+        if (choice === 'Es mi servidor') void this.context.globalState.update(ENDPOINT_ACK_KEY, host);
+      });
+  }
+
   // --- Events --------------------------------------------------------------------------------
 
   private onConfigChange(event: vscode.ConfigurationChangeEvent): void {
@@ -595,7 +640,7 @@ class Ghostline implements vscode.Disposable {
     await vscode.window.showTextDocument(document, { preview: true });
   }
 
-  /** Spec §8e: when the median latency is above 1.5 s, say so once a day and offer the two ways out. */
+  /** When the median latency is above 1.5 s, say so once a day and offer the two ways out. */
   private maybeWarnSlow(): void {
     // Only where speed is what was asked for. With `reasoning: adaptive` the model stops to think
     // on purpose (2–3 s), and the remedies this offers would not change that.
@@ -723,26 +768,11 @@ class Ghostline implements vscode.Disposable {
         : undefined;
   }
 
-  /** Removes working folders left behind by earlier sessions (only if empty: rmdir, never recursive). */
+  /** Removes working folders left behind by earlier sessions, here and where early versions kept them. */
   private removeStaleCwds(): void {
-    const tmp = os.tmpdir();
-    let names: string[];
-    try {
-      names = fs.readdirSync(tmp);
-    } catch {
-      return;
-    }
-    const dayAgo = Date.now() - 24 * 3600_000;
-    for (const name of names) {
-      if (!name.startsWith(CWD_PREFIX)) continue;
-      const dir = path.join(tmp, name);
-      if (dir === this.cwd) continue;
-      try {
-        if (fs.statSync(dir).mtimeMs < dayAgo) fs.rmdirSync(dir);
-      } catch {
-        // In use by another window, or not empty: leave it.
-      }
-    }
+    const day = 24 * 3600_000;
+    removeStaleWorkFolders(path.join(this.context.globalStorageUri.fsPath, WORK_FOLDERS), WORK_FOLDER_PREFIX, this.cwd, day);
+    removeStaleWorkFolders(os.tmpdir(), LEGACY_CWD_PREFIX, this.cwd, day);
   }
 }
 

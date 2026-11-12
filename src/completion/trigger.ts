@@ -22,7 +22,7 @@ export function typedInsertionEnd(
 }
 
 /**
- * Auto mode with code after the cursor on the same line ("conversation, |c.queries.Create(…)"): worth
+ * Auto mode with code after the cursor on the same line ("order, |store.Create(…)"): worth
  * a request only where an insertion makes sense. Not on a line with nothing typed before the cursor,
  * not in the middle of a word, and not inside a string or a comment, where it is text being edited.
  * The caller also requires that the user has just typed right there.

@@ -1,9 +1,10 @@
+import { withoutStructuralTags } from '../completion/promptBuilder';
 import { identifiers } from '../learning/similarity';
 
-/** Pure helpers for Phase 3 (symbol context through the language server). */
+/** Pure helpers for the symbol context (declarations found through the language server). */
 
 export const MAX_SYMBOLS = 3;
-/** The spec's ceiling for the whole block. */
+/** Ceiling for the whole block. */
 export const MAX_SYMBOL_TOKENS = 400;
 const MAX_SIGNATURE_CHARS = 240;
 const MAX_SIGNATURE_LINES = 4;
@@ -40,7 +41,7 @@ export function pickIdentifiers(linePrefix: string, max: number = MAX_SYMBOLS): 
 
 /**
  * The first identifiers after the cursor on its line, nearest first: what an insertion in front of
- * existing code is about ("messages▮ c.queries.ListContextMessages(…)" needs to know what that call
+ * existing code is about ("items▮ store.ListItems(…)" needs to know what that call
  * returns). Columns are relative to the start of `restOfLine`.
  */
 export function pickIdentifiersAfter(restOfLine: string, max: number = MAX_SYMBOLS): IdentifierUse[] {
@@ -223,7 +224,7 @@ export function formatSymbols(symbols: readonly ResolvedSymbol[], charsPerToken:
   let budget = maxTokens * charsPerToken;
   for (const symbol of symbols) {
     if (lines.length >= MAX_SYMBOLS) break;
-    const signature = symbol.signature.trim();
+    const signature = withoutStructuralTags(symbol.signature).trim();
     if (!signature || seen.has(signature)) continue;
     const line = `${signature}  // ${symbol.path}`;
     if (line.length > budget) continue;

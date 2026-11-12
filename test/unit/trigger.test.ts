@@ -22,16 +22,16 @@ test('auto mode fires at the end of the line or before closing characters only',
 });
 
 test('in the middle of a line auto mode only asks where an insertion makes sense', () => {
-  const call = 'c.queries.CreateConversation(ctx, gen.CreateConversationParams{';
-  assert.equal(midLineAllowsAuto('\t\tconversation, ', call), true);
-  assert.equal(midLineAllowsAuto('\t\tconversation,', call), true);
+  const call = 'c.queries.CreateOrder(ctx, gen.CreateOrderParams{';
+  assert.equal(midLineAllowsAuto('\t\torder, ', call), true);
+  assert.equal(midLineAllowsAuto('\t\torder,', call), true);
   assert.equal(midLineAllowsAuto('  const ', 'compute(a, b);'), true);
   assert.equal(midLineAllowsAuto('  call(first, ', 'last)'), true);
   // Nothing typed on the line yet, or nothing but whitespace after the cursor.
   assert.equal(midLineAllowsAuto('\t\t', call), false);
   assert.equal(midLineAllowsAuto('  const x = ', '  '), false);
   // Inside a word: a rename, not an insertion.
-  assert.equal(midLineAllowsAuto('\t\tconversation', call), false);
+  assert.equal(midLineAllowsAuto('\t\torder', call), false);
   assert.equal(midLineAllowsAuto('  const tot', 'al = 1;'), false);
   // Inside a string or a comment it is text being edited.
   assert.equal(midLineAllowsAuto('  log("user ', 'created");'), false);
@@ -59,7 +59,7 @@ test('only a short plain insertion counts as typed by hand', () => {
 });
 
 test('context classification', () => {
-  assert.equal(classifyContext('  conversation, ', 'c.run(ctx)'), 'mid-line');
+  assert.equal(classifyContext('  order, ', 'c.run(ctx)'), 'mid-line');
   assert.equal(classifyContext('  foo(', 'a, b)'), 'mid-line');
   // Closing characters after the cursor do not make it the middle of a line.
   assert.equal(classifyContext('  foo(', ')'), 'after-paren');

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { userMessageLine } from './args';
+import { ensureEmptyWorkFolder } from './workFolder';
 import {
   NdjsonParser,
   ZERO_USAGE,
@@ -62,6 +63,19 @@ interface TurnState {
 }
 
 const STDERR_TAIL_CHARS = 2000;
+
+/**
+ * What the CLI prints on failure ends up in ghostline's log, which people paste into bug reports.
+ * Anything in it that looks like a key or a session token is blanked out first.
+ */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, 'sk-***')
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 ***')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '***')
+    .replace(/((?:api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|authorization|x-api-key|password|secret)["']?\s*[:=]\s*["']?)[^\s"',;]{6,}/gi, '$1***')
+    .replace(/(\/\/)[^/\s:@]+:[^/\s@]+@/g, '$1***@');
+}
 /** Rough output-token estimate for turns that never reached `result`. */
 const OUTPUT_CHARS_PER_TOKEN = 3;
 
@@ -87,6 +101,8 @@ export class CliWorker {
     private readonly events: WorkerEvents = {},
   ) {
     this.parser = new NdjsonParser((obj) => this.handleMessage(obj));
+    // Throws, and nothing is launched, unless the working folder is empty (see workFolder.ts).
+    ensureEmptyWorkFolder(options.cwd);
     // shell: false always. Arguments reach the CLI verbatim, including the empty string of `--tools ""`.
     this.child = spawn(options.command, options.args, {
       cwd: options.cwd,
@@ -104,7 +120,7 @@ export class CliWorker {
     this.child.on('error', (error) => this.handleExit(`no se pudo lanzar la CLI: ${error.message}`));
     this.child.on('close', (code, signal) => {
       this.parser.end();
-      const stderr = this.stderrTail.trim();
+      const stderr = redactSecrets(this.stderrTail.trim());
       const how = signal ? `señal ${signal}` : `código ${code ?? '?'}`;
       this.handleExit(`la CLI terminó (${how})${stderr ? `: ${stderr}` : ''}`);
     });

@@ -152,7 +152,7 @@ test('tracker: spend by time, for the share of a Claude session that is ghostlin
 test('tracker: a cut-off request before anything was measured is priced as a typical completion', () => {
   const tracker = new UsageTracker(memoryStore(), clock('2026-11-11T10:00:00Z').now);
   tracker.recordUnconfirmed(1900);
-  assert.ok(Math.abs(tracker.spentSince(0) - 0.00025) < 1e-9);
+  assert.ok(Math.abs(tracker.spentSince(0) - 0.0045) < 1e-9);
   // A broken or foreign value in storage is ignored.
   const store = memoryStore();
   store.data.set('ghostline.spend.v1', [['x', 1], [Date.parse('2026-11-11T09:00:00Z'), -3], 'nope', [Date.parse('2026-11-11T09:00:00Z'), 0.5]]);

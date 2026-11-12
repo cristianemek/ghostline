@@ -5,7 +5,7 @@
 //   npm run bench -- [--n 12] [--mode single-use|persistent] [--model haiku] [--effort low]
 //                    [--gap 1200] [--cache on|off] [--verbose]
 //                    [--style]     learn this repo's style profile first and send it with every request
-//                    [--examples]  feed back each original line as an accepted example (Phase 2 few-shot)
+//                    [--examples]  feed back each original line as an accepted example (few-shot)
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';

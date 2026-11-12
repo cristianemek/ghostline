@@ -20,8 +20,8 @@ export interface LearningDeps {
 
 /**
  * How long an accepted suggestion must stay in the file before it becomes an example. Accepting is
- * not approving: in real use wrong suggestions were taken with Tab and fixed by hand afterwards, and
- * as examples they taught the model the same mistake (see docs/acierto.md).
+ * not approving: a wrong suggestion taken with Tab and fixed by hand afterwards would, as an
+ * example, teach the model the same mistake.
  */
 export const EXAMPLE_SURVIVAL_MS = 10 * 60_000;
 
@@ -36,7 +36,7 @@ export const CONTEXT_LABELS: Record<TriggerContext, string> = {
 };
 
 /**
- * Phase 2: adapts ghostline to the user without training anything. Everything it knows lives in the
+ * Adapts ghostline to the user without training anything. Everything it knows lives in the
  * editor's local storage.
  */
 export class Learning implements LearningHooks {

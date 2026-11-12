@@ -1,5 +1,5 @@
 import { cleanBlock } from '../completion/postprocess';
-import { takePrefix, takeSuffix, type PromptLimits } from '../completion/promptBuilder';
+import { takePrefix, takeSuffix, withoutStructuralTags, type PromptLimits } from '../completion/promptBuilder';
 
 /**
  * Corrections: code that is already written and that the compiler rejects, rewritten. Everything here
@@ -66,6 +66,17 @@ export function fixRegion(lineAt: (line: number) => string, lineCount: number, p
   return { startLine, endLine };
 }
 
+/**
+ * A compiler message as it goes into the prompt: its first line, without the tags that structure
+ * the prompt, and with any path cut down to its last part (messages quote absolute paths, and the
+ * layout of the user's disk is nobody's business).
+ */
+function problemText(message: string): string {
+  const firstLine = message.split('\n')[0] ?? '';
+  const withoutPaths = firstLine.replace(/(?:[A-Za-z]:)?(?:[\\/][^\s'"`:()<>|\\/]+){2,}/g, (path) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1));
+  return withoutStructuralTags(withoutPaths).slice(0, MAX_MESSAGE_CHARS);
+}
+
 export interface FixPromptInput {
   path: string;
   languageId: string;
@@ -90,7 +101,7 @@ export function buildFixPrompt(input: FixPromptInput): { text: string; chars: nu
   const prefix = takePrefix(input.before, limits.prefixLines, Math.min(limits.prefixChars, Math.max(400, budget - suffix.length - input.region.length)));
   const seen = new Set<string>();
   const problems = input.problems
-    .map((problem) => `- line ${problem.line - input.regionStartLine + 1}: ${problem.message.split('\n')[0]?.slice(0, MAX_MESSAGE_CHARS) ?? ''}`)
+    .map((problem) => `- line ${problem.line - input.regionStartLine + 1}: ${problemText(problem.message)}`)
     .filter((line) => !seen.has(line) && seen.add(line))
     .slice(0, MAX_PROBLEMS);
   const attribute = (value: string): string => value.replace(/["\r\n]/g, ' ').trim();
@@ -129,8 +140,8 @@ export function parseFix(answer: string, original: readonly string[], languageId
   // ("switch {⏎case x:" with no closing brace, or the tail of a call: "ctx, id)").
   if (lines.reduce((depth, line) => depth + depthChange(line), 0) !== 0) return undefined;
   // A rewrite starts where the original starts. An answer that does not is a fragment of the line
-  // (the model answering as if it were completing): "ListContextMessages(ctx, id)" for
-  // "rows, err := c.queries.ListContextMessages(ctx, id, nil)". Two characters are enough to let a
+  // (the model answering as if it were completing): "ListItems(ctx, id)" for
+  // "rows, err := store.ListItems(ctx, id, nil)". Two characters are enough to let a
   // corrected typo through ("retrun" → "return").
   const start = (list: readonly string[]): string => (list.find((line) => line.trim() !== '') ?? '').trim().slice(0, 2);
   if (start(lines) !== start(original)) return undefined;

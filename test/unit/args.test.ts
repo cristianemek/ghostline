@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildCliArgs, buildCliEnv, userMessageLine } from '../../src/cli/args';
+import { buildCliArgs, buildCliEnv, endpointOverride, userMessageLine } from '../../src/cli/args';
 import { formatRequestLine } from '../../src/usage/requestLog';
 import { dayRow, sessionStart, statusText, summaryLine, tooltipLines, usesApiKey, type SessionInfo } from '../../src/usage/report';
 import { emptyDay } from '../../src/usage/usageTracker';
 
-test('arguments: every flag from the spec, plus --setting-sources project', () => {
+test('the server the requests go to is reported when the environment points away from Anthropic, host only', () => {
+  assert.equal(endpointOverride({}), undefined);
+  assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: '  ' }), undefined);
+  assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: 'https://api.anthropic.com' }), undefined);
+  assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: 'https://gateway.example.com/v1' }), 'gateway.example.com');
+  // Credentials in the address are never repeated.
+  assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: 'http://user:hunter2@10.0.0.7:8080/x' }), '10.0.0.7:8080');
+  assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: 'not a url' }), 'una dirección no reconocible');
+});
+
+test('arguments: no tools, no MCP, no commands, no saved session, and settings only from our own empty folder', () => {
   const args = buildCliArgs({ model: 'haiku', effort: 'low', systemPromptFile: 'C:\\ext\\system prompt.txt' });
   assert.deepEqual(args, [
     '-p',

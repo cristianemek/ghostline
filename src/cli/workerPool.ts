@@ -1,4 +1,3 @@
-import { mkdirSync } from 'node:fs';
 import { buildCliArgs, buildCliEnv } from './args';
 import type { InitInfo, RateLimitInfo } from './streamParser';
 import { CliWorker, type TurnResult } from './worker';
@@ -13,7 +12,7 @@ export interface PoolConfig {
   model: string;
   effort: string;
   systemPromptFile: string;
-  /** An empty folder of our own. Never the project folder. */
+  /** An empty folder of our own, never the project folder: the CLI obeys settings it finds there. */
   cwd: string;
   mode: WorkerMode;
   /** Persistent mode: requests served by one process before its conversation is thrown away. */
@@ -181,9 +180,6 @@ export class WorkerPool {
       ...(config.extraArgs ?? []),
     ];
     try {
-      // The working folder lives in the OS temp directory, where anything may clean it up while the
-      // editor is open. Without it every launch fails with a misleading "ENOENT".
-      mkdirSync(config.cwd, { recursive: true });
       this.spawnCount++;
       return new CliWorker(
         {

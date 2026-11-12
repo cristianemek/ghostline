@@ -24,6 +24,22 @@ export const DEFAULT_LIMITS: Omit<PromptLimits, 'targetTokens' | 'charsPerToken'
   hardTokens: 2500,
 };
 
+const TAG_NAMES = 'project|style|examples?|before|accepted|symbols|file|prefix|suffix|cursor|line|fix|region';
+/** Closing tags, and opening ones with attributes or self-closed: in any case and spacing. */
+const STRUCTURAL_TAG = new RegExp(`<\\/\\s*(?:${TAG_NAMES})\\s*>|<(?:${TAG_NAMES})(?:\\s[^>]*|\\s*\\/)>`, 'gi');
+/** A bare opening tag only as the prompts write it: `Promise<File>` in a declaration is a type. */
+const BARE_OPENING_TAG = new RegExp(`<(?:${TAG_NAMES})>`, 'g');
+
+/**
+ * Text that goes into a prompt outside <file> (the project index, declarations, the style profile,
+ * compiler messages) is taken from files of the workspace. A file written to say "</project><file …>"
+ * there would be rewriting the structure of every prompt, so the tags that give the prompts their
+ * structure are removed from it.
+ */
+export function withoutStructuralTags(text: string): string {
+  return text.replace(STRUCTURAL_TAG, '').replace(BARE_OPENING_TAG, '');
+}
+
 /** The suffix matters less than the prefix: it never takes more than this share of the file budget. */
 const SUFFIX_SHARE = 0.25;
 const MIN_PREFIX_CHARS = 400;
@@ -157,7 +173,7 @@ export interface CursorLine {
 /**
  * With code after the cursor on its own line the model has to work out an insertion, not a
  * continuation, and asked for the bare insertion it mostly answered with something unrelated. Asked
- * for the whole line as it should read it gets it right (measured: docs/acierto.md), so the line is
+ * for the whole line as it should read it gets it right, so the line is
  * shown again on its own with the cursor marked, and the insertion is derived from the answer.
  */
 export function cursorLine(prefix: string, suffix: string): CursorLine | undefined {
@@ -183,7 +199,7 @@ function render(input: PromptInput, prefix: string, suffix: string, blocks: Bloc
  * Builds the user message. Order is fixed: the stable block (style) first, then the variable blocks
  * (examples, symbols) and the file context last, right next to where the model starts answering.
  *
- * Budget (measured in docs/fase-2.md):
+ * Budget:
  * - the file context gets the whole target by default;
  * - the style profile is added only when the file leaves room for it. In a long file the surrounding
  *   code already shows the style, and trading real code for a generic guide made suggestions worse;

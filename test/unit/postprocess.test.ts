@@ -141,7 +141,7 @@ test('an answer in which the model second-guesses itself is not offered at all',
   assert.equal(run("status === 'success' ... wait—the chain ends with `else if (record.status` so this is wrong", '    } else if (record.'), '');
   assert.equal(run('return total;\nNo, the function returns void here', '  '), '');
   assert.equal(run('wait — the cursor is inside a string', '  '), '');
-  // …and in real use (Go): the part before the doubt is a draft the model is taking back.
+  // …and in Go: the part before the doubt is a draft the model is taking back.
   assert.equal(run('status := ... no; the function ends after the status/content normalization.', '\t', '\n}', { indent: TABS }), '');
   assert.equal(run('"log slog.Error"? No —', '\tslog.Error(', ')', { indent: TABS }), '');
   assert.equal(run('return items... actually the loop above already returns', '  '), '');
@@ -227,11 +227,11 @@ test('suffix overlap: same line', () => {
   assert.equal(run('items[0]', 'use(', ')'), 'items[0]');
 });
 
-test('a block wrapped in single backticks is markdown, not code (accepted like that in real use)', () => {
-  const raw = '`if err != nil {\n\t\treturn pgtype.UUID{}, nil, fmt.Errorf("list context messages: %w", err)\n\t}\n`';
+test('a block wrapped in single backticks is markdown, not code', () => {
+  const raw = '`if err != nil {\n\t\treturn pgtype.UUID{}, nil, fmt.Errorf("list context items: %w", err)\n\t}\n`';
   assert.equal(
-    run(raw, 'messages, err := c.queries.ListContextMessages(ctx, conversationID)\n\n\t', '\n\n\treturn pgtype.UUID{}, nil, nil\n}', { indent: TABS }),
-    'if err != nil {\n\t\treturn pgtype.UUID{}, nil, fmt.Errorf("list context messages: %w", err)\n\t}',
+    run(raw, 'items, err := c.queries.ListOrderItems(ctx, orderID)\n\n\t', '\n\n\treturn pgtype.UUID{}, nil, nil\n}', { indent: TABS }),
+    'if err != nil {\n\t\treturn pgtype.UUID{}, nil, fmt.Errorf("list context items: %w", err)\n\t}',
   );
   // Where a value is expected it may be a real multi-line raw string or template literal.
   assert.equal(run('`SELECT id\nFROM users`', 'const query = ', ''), '`SELECT id\nFROM users`');
@@ -239,39 +239,38 @@ test('a block wrapped in single backticks is markdown, not code (accepted like t
 });
 
 test('mid-line: the insertion is what turns the current line into the whole line the model wrote', () => {
-  const call = 'c.queries.ListContextMessages(ctx, conversationID)';
-  // The two cases from real use.
-  assert.equal(insertionFromLine(`messages, err := ${call}`, '\tmessages', ` ${call}`), ', err :=');
+  const call = 'c.queries.ListOrderItems(ctx, orderID)';
+  assert.equal(insertionFromLine(`items, err := ${call}`, '\titems', ` ${call}`), ', err :=');
   assert.equal(
-    insertionFromLine('conversation, err := c.queries.CreateConversation(ctx, gen.CreateConversationParams{', '\t\tconversation, ', 'c.queries.CreateConversation(ctx, gen.CreateConversationParams{'),
+    insertionFromLine('order, err := c.queries.CreateOrder(ctx, gen.CreateOrderParams{', '\t\torder, ', 'c.queries.CreateOrder(ctx, gen.CreateOrderParams{'),
     'err := ',
   );
   // Indentation, a code fence, an echoed cursor mark or lines after the first do not matter.
-  assert.equal(insertionFromLine(`\t\tmessages, err := ${call}\n\tif err != nil {`, '\tmessages', ` ${call}`), ', err :=');
-  assert.equal(insertionFromLine('```go\nmessages, err :=▮ ' + call + '\n```', '\tmessages', ` ${call}`), ', err :=');
+  assert.equal(insertionFromLine(`\t\titems, err := ${call}\n\tif err != nil {`, '\titems', ` ${call}`), ', err :=');
+  assert.equal(insertionFromLine('```go\nitems, err :=▮ ' + call + '\n```', '\titems', ` ${call}`), ', err :=');
   // Something on either side was changed, nothing was added, or it is not the line at all: no completion.
-  assert.equal(insertionFromLine(`msgs, err := ${call}`, '\tmessages', ` ${call}`), '');
-  assert.equal(insertionFromLine('messages, err := c.queries.ListContextMessages(ctx)', '\tmessages', ` ${call}`), '');
-  assert.equal(insertionFromLine(`messages ${call}`, '\tmessages', ` ${call}`), '');
-  assert.equal(insertionFromLine('<none/>', '\tmessages', ` ${call}`), '');
-  assert.equal(insertionFromLine('', '\tmessages', ` ${call}`), '');
+  assert.equal(insertionFromLine(`msgs, err := ${call}`, '\titems', ` ${call}`), '');
+  assert.equal(insertionFromLine('items, err := c.queries.ListOrderItems(ctx)', '\titems', ` ${call}`), '');
+  assert.equal(insertionFromLine(`items ${call}`, '\titems', ` ${call}`), '');
+  assert.equal(insertionFromLine('<none/>', '\titems', ` ${call}`), '');
+  assert.equal(insertionFromLine('', '\titems', ` ${call}`), '');
 
   // While the answer is still arriving: what it would insert so far.
-  assert.equal(insertionSoFar('', '\tmessages'), '');
-  assert.equal(insertionSoFar('mess', '\tmessages'), '');
-  assert.equal(insertionSoFar('messages, e', '\tmessages'), ', e');
-  assert.equal(insertionSoFar(`messages, err := ${call}`, '\tmessages'), `, err := ${call}`);
+  assert.equal(insertionSoFar('', '\titems'), '');
+  assert.equal(insertionSoFar('ite', '\titems'), '');
+  assert.equal(insertionSoFar('items, e', '\titems'), ', e');
+  assert.equal(insertionSoFar(`items, err := ${call}`, '\titems'), `, err := ${call}`);
   // It is writing some other line: no point in waiting for it.
-  assert.equal(insertionSoFar('The line needs', '\tmessages'), null);
+  assert.equal(insertionSoFar('The line needs', '\titems'), null);
 });
 
 test('leftovers of the answer format are not code (seen with the real CLI)', () => {
   const go = (raw: string, prefix: string, suffix: string): string =>
     postprocess({ raw, prefix, suffix, maxLines: 6, indent: TABS, languageId: 'go' });
   // A closing tag nothing opened.
-  assert.equal(go('ctx, conversationID</parameter>', '\tc.queries.ListContextMessages(', ')'), 'ctx, conversationID');
+  assert.equal(go('ctx, orderID</parameter>', '\tc.queries.ListOrderItems(', ')'), 'ctx, orderID');
   // The prompt's own tags: the model is echoing, there is nothing to show.
-  assert.equal(go('<prefix> cursor only </prefix>', '\tmessages', ' c.queries.ListContextMessages(ctx)'), '');
+  assert.equal(go('<prefix> cursor only </prefix>', '\titems', ' c.queries.ListOrderItems(ctx)'), '');
   assert.equal(go('</suffix>', '\tx := ', ''), '');
   // Where tags are code they stay.
   assert.equal(postprocess({ raw: 'Hello</span>', prefix: '<span>', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'html' }), 'Hello</span>');
@@ -286,10 +285,10 @@ test('leftovers of the answer format are not code (seen with the real CLI)', () 
 test('go: the brace of a named literal written again is dropped; in a slice or map literal it opens an element', () => {
   const go = (raw: string, prefix: string, suffix: string): string =>
     postprocess({ raw, prefix, suffix, maxLines: 6, indent: TABS, languageId: 'go' });
-  // Accepted like this in real use: "…Params{{ConversationID: …}".
+  // "…Params{{OrderID: …}".
   assert.equal(
-    go('{ConversationID: conversationID, Role: gen.MessageRoleUser}', '\tc.queries.CreateMessage(ctx, gen.CreateMessageParams{', '})'),
-    'ConversationID: conversationID, Role: gen.MessageRoleUser',
+    go('{OrderID: orderID, Role: gen.ItemKindProduct}', '\tc.queries.CreateItem(ctx, gen.CreateItemParams{', '})'),
+    'OrderID: orderID, Role: gen.ItemKindProduct',
   );
   assert.equal(go('{Name: "a"', '\titem := &Item{', '}'), 'Name: "a"');
   assert.equal(go('{Name: "a"}, {Name: "b"}', '\titems := []Item{', '}'), '{Name: "a"}, {Name: "b"}');
@@ -300,12 +299,12 @@ test('go: the brace of a named literal written again is dropped; in a slice or m
 });
 
 test('in front of more code on the same line the separating space is part of the completion', () => {
-  const rest = 'c.queries.CreateConversation(ctx, gen.CreateConversationParams{\n\t\t\tChannel: in.Channel,';
+  const rest = 'c.queries.CreateOrder(ctx, gen.CreateOrderParams{\n\t\t\tKind: in.Kind,';
   // Seen with the real CLI: once with the space, once without it.
-  assert.equal(run('err := ', '\t\tconversation, ', rest, { indent: TABS }), 'err := ');
-  assert.equal(run('err :=', '\t\tconversation, ', rest, { indent: TABS }), 'err := ');
+  assert.equal(run('err := ', '\t\torder, ', rest, { indent: TABS }), 'err := ');
+  assert.equal(run('err :=', '\t\torder, ', rest, { indent: TABS }), 'err := ');
   // The model restates the rest of the line: only the new part, with its space.
-  assert.equal(run('err := c.queries.CreateConversation(ctx, gen.CreateConversationParams{', '\t\tconversation, ', rest, { indent: TABS }), 'err := ');
+  assert.equal(run('err := c.queries.CreateOrder(ctx, gen.CreateOrderParams{', '\t\torder, ', rest, { indent: TABS }), 'err := ');
   assert.equal(run('total ', 'const ', 'compute(a, b);'), 'total ');
   assert.equal(run('first,', 'call(', 'second)'), 'first, ');
   assert.equal(run('=', 'const total ', 'compute(a, b);'), '= ');
@@ -314,7 +313,7 @@ test('in front of more code on the same line the separating space is part of the
   assert.equal(run('user', 'log(', '.name)'), 'user');
   assert.equal(run('a, b ', 'foo(', ')'), 'a, b');
   // At the end of the line trailing whitespace is still dropped.
-  assert.equal(run('err := ', '\t\tconversation, ', '\n\t\tnext()', { indent: TABS }), 'err :=');
+  assert.equal(run('err := ', '\t\torder, ', '\n\t\tnext()', { indent: TABS }), 'err :=');
 });
 
 test('suffix overlap: identical to what follows the cursor', () => {

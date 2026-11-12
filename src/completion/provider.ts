@@ -30,8 +30,8 @@ export const ACCEPT_COMMAND = 'ghostline._accepted';
 
 const MAX_DOCUMENT_CHARS = 1_000_000;
 /**
- * Total input tokens to aim for per request, as the CLI reports them. The spec's acceptance bar is a
- * median of 2.000; aiming a little under leaves room for estimation error.
+ * Total input tokens to aim for per request, as the CLI reports them and leaving the project index
+ * aside. A little under 2.000 leaves room for estimation error.
  */
 const TARGET_TOTAL_INPUT_TOKENS = 1900;
 const MIN_FILE_TOKENS = 300;
@@ -48,7 +48,7 @@ const SENT_TO_API_MS = 150;
 /** How long a programmatic refresh may take to reach the provider. */
 const REFRESH_WINDOW_MS = 1000;
 
-/** Phase 3: declarations of symbols used at the cursor. */
+/** Declarations of symbols used at the cursor. */
 export type SymbolProvider = (
   document: vscode.TextDocument,
   position: vscode.Position,
@@ -110,7 +110,7 @@ interface Arrival {
 }
 
 /**
- * A request in the air. It is no longer killed by the next keystroke: if the user keeps typing what
+ * A request in the air. The next keystroke does not kill it: if the user keeps typing what
  * the model is answering, the answer is still good when it lands, and it lands a whole request
  * sooner than a new one would.
  */
@@ -366,9 +366,9 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     // 4. Rules that only apply to automatic triggering.
     if (!manual) {
       if (config.disabledLanguages.includes(languageId)) return undefined;
-      // Right after a suggestion is taken the model has just said all it had for this spot: in real
-      // use, asking again there came back empty. The next keystroke lifts this. (With speculation
-      // on, that follow-up is exactly the bet that was asked for.)
+      // Right after a suggestion is taken the model has just said all it had for this spot: asking
+      // again there comes back empty. The next keystroke lifts this. (With speculation on, that
+      // follow-up is exactly the bet that was asked for.)
       const taken = this.afterAccept;
       if (
         config.speculation === 'off' &&
@@ -381,7 +381,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       }
       if (codeAfter) {
         // In the middle of a line only right where the user has just typed something by hand: an
-        // insertion in front of existing code ("conversation, |c.queries.Create(…)"). Deleting,
+        // insertion in front of existing code ("order, |store.Create(…)"). Deleting,
         // pasting or merely placing the cursor there asks for nothing.
         const justTyped = this.typedAt?.documentKey === documentKey && this.typedAt.offset === offset;
         if (!config.midLine || !justTyped || !midLineAllowsAuto(linePrefix, restOfLine)) return undefined;
@@ -421,7 +421,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
 
     // 6. Wait for the typing to settle. How long depends on where the cursor is: nothing right after
     // accepting a suggestion, a short wait where a suggestion is most wanted, the full debounce in
-    // the middle of a word. The symbol lookup (Phase 3) shares the wait, starting halfway through so
+    // the middle of a word. The symbol lookup shares the wait, starting halfway through so
     // that a burst of typing does not send a query per keystroke to the language server.
     const waiter = new AbortController();
     const subscription = token.onCancellationRequested(() => waiter.abort());
@@ -434,8 +434,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       };
       // Time already spent waiting for a flight that turned out to be for something else counts
       // towards the pause, but does not replace it: while the user is still typing this call is
-      // cancelled before the wait is over. (Asking at once instead chained three to five requests
-      // per line in the typing simulation.)
+      // cancelled before the wait is over. (Asking at once instead chains several requests per line.)
       const delay = manual ? 0 : Math.max(0, this.delayFor(config, linePrefix) - (waited ? Date.now() - calledAt : 0));
       if (delay > 0) {
         if (!(await wait(delay / 2, waiter.signal))) return undefined;
@@ -601,7 +600,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     if (now - this.acceptedAt < AFTER_ACCEPT_MS) return 0;
     // A new line is where a prediction pays off most: it covers the whole statement, and if the user
     // starts typing what it says, it is on screen before they pause. The same bet inside a line
-    // (after ".", "(", "="…) was measured too: more tokens and no shorter wait, so it is not made.
+    // (after ".", "(", "="…) costs more tokens for no shorter wait, so it is not made.
     if (linePrefix.trim() === '') return eagerDelay(config.debounceMs, config.eagerDebounceMs, this.typing.medianGap(now));
     return full;
   }
@@ -638,8 +637,8 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     // Someone who joined a flight started for an earlier cursor position checks each new piece of
     // the answer against what was typed since, and leaves as soon as they disagree.
     // A flight that stays silent is one where the model stopped to think. It is not abandoned for
-    // that: in real use a one-second limit killed requests just before they answered (the first
-    // token took ~1.1 s there), and the answers that come after thinking are the ones most often right.
+    // that: a short limit kills requests just before they answer, and the answers that come after
+    // thinking are the ones most often right.
     let listener: (() => void) | undefined;
     const diverged = new Promise<'diverged'>((resolve) => {
       if (!stillFits) return;

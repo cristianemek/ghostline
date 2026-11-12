@@ -25,7 +25,7 @@ export interface StyleManagerDeps {
   /** How to start the CLI, or why it cannot be started. */
   launcher(): Launcher;
   /** The CLI's working folder: the same empty folder the completions use. */
-  cwd: string;
+  cwd(): string;
   charsPerToken(): number;
   usage: UsageTracker;
   log(line: string): void;
@@ -155,7 +155,7 @@ export class StyleManager {
           systemPromptFile: deps.context.asAbsolutePath('resources/style-system-prompt.txt'),
         }),
       ],
-      cwd: deps.cwd,
+      cwd: deps.cwd(),
       env: buildCliEnv(process.env, { promptCache: false }),
     });
     const prompt = buildStylePrompt(files, Math.min(deps.charsPerToken(), STYLE_CHARS_PER_TOKEN));

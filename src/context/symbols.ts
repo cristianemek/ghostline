@@ -37,7 +37,7 @@ function targetOf(definition: Definition): { uri: vscode.Uri; line: number } {
 }
 
 /**
- * Phase 3: for up to three identifiers, asks the language server where they are defined and returns
+ * For up to three identifiers, asks the language server where they are defined and returns
  * the declaration of each: the signature line or, for a struct, interface, object type or enum of
  * this workspace, its members too. The identifiers come from the current line and, when there is
  * room, from the line that opened the call or literal the cursor is inside of. Definitions the prompt
@@ -84,7 +84,7 @@ export function createSymbolProvider(deps: SymbolDeps) {
     const linePrefix = lineText.slice(0, position.character);
     const wanted = pickIdentifiers(linePrefix).map((use) => ({ name: use.name, at: new vscode.Position(position.line, use.character) }));
     // Code after the cursor on the same line: an insertion in front of a call is about that call
-    // ("messages▮ c.queries.ListContextMessages(…)": what does it return?).
+    // ("items▮ store.ListItems(…)": what does it return?).
     for (const use of pickIdentifiersAfter(lineText.slice(position.character))) {
       if (wanted.length >= MAX_SYMBOLS) break;
       if (!wanted.some((known) => known.name === use.name)) {

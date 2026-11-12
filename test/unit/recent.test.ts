@@ -23,8 +23,8 @@ function entry(overrides: Partial<RecentEntry> = {}): RecentEntry {
     languageId: 'go',
     context: 'mid-line',
     manual: false,
-    before: '\tmessages',
-    after: ' c.queries.ListContextMessages(ctx, conversationID)',
+    before: '\titems',
+    after: ' c.queries.ListOrderItems(ctx, orderID)',
     raw: '= ghostline Model',
     shown: '= ghostline Model',
     hints: ['2 ej.'],
@@ -88,13 +88,13 @@ test('recent: bounded in number and in size; request numbers restart with each w
 test('recent: the view shows the line with the cursor, what was offered and, when it differs, what the model said', () => {
   const text = formatRecent([
     entry({ id: 34, outcome: 'aceptada' }),
-    entry({ id: 35, context: 'new-line', before: '\t', after: '', raw: '`if err != nil {\n\t}\n`', shown: 'if err != nil {\n\t}', thinkingTokens: 120, hints: ['símbolos: ListContextMessages, queries'] }),
+    entry({ id: 35, context: 'new-line', before: '\t', after: '', raw: '`if err != nil {\n\t}\n`', shown: 'if err != nil {\n\t}', thinkingTokens: 120, hints: ['símbolos: ListOrderItems, queries'] }),
     entry({ id: 36, raw: '<none/>', shown: '', outcome: 'vacía', manual: true }),
   ]);
   assert.match(text, /api\/core\.go · go mid-line · ACEPTADA · 1930 tok · 1067 ms · 2 ej\./);
-  assert.match(text, /línea: {4}⇥messages▮ c\.queries\.ListContextMessages\(ctx, conversationID\)/);
+  assert.match(text, /línea: {4}⇥items▮ c\.queries\.ListOrderItems\(ctx, orderID\)/);
   assert.match(text, /ofrecido: = ghostline Model\n\n/);
-  assert.match(text, /go new-line · SIN RESOLVER · 1930 tok · 1067 ms \(razonó\) · símbolos: ListContextMessages, queries/);
+  assert.match(text, /go new-line · SIN RESOLVER · 1930 tok · 1067 ms \(razonó\) · símbolos: ListOrderItems, queries/);
   assert.match(text, /ofrecido: if err != nil \{⏎⇥\}\n {2}modelo: {3}`if err != nil \{⏎⇥\}⏎`/);
   assert.match(text, /go mid-line \(manual\) · VACÍA/);
   assert.match(text, /ofrecido: \(nada\)\n {2}modelo: {3}<none\/>/);

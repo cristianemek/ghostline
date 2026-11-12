@@ -28,8 +28,8 @@ export const DEFAULT_SELECT: Omit<SelectOptions, 'charsPerToken'> = { max: 2, ma
 
 const STORE_KEY = 'ghostline.examples.v2';
 /**
- * Up to v0.8 a suggestion was stored the moment it was accepted, right or wrong. Those examples
- * cannot be told apart now, so they are dropped.
+ * Early versions stored a suggestion the moment it was accepted, right or wrong. Those examples
+ * cannot be told apart, so they are dropped.
  */
 const UNVERIFIED_KEY = 'ghostline.examples.v1';
 const MAX_PER_LANGUAGE = 200;
@@ -46,8 +46,8 @@ function isStored(value: unknown): value is StoredExample {
 /**
  * The completions the user accepted and kept, per language, in the workspace state (local only). A
  * couple of the ones most similar to what is being typed go into each prompt as few-shot examples:
- * that is how ghostline "learns" without any model training. Off by default since v0.9: measured on
- * real calls, they made the model copy the shape of the example over the declaration in front of it.
+ * that is how ghostline "learns" without any model training. Off by default: an example can make
+ * the model copy its shape over the declaration it has in front.
  */
 export class ExampleStore {
   private byLanguage = new Map<string, StoredExample[]>();

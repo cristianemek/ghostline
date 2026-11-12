@@ -21,7 +21,7 @@ export interface PromptExtras {
   examples?: PromptExample[];
 }
 
-/** Where Phase 2 plugs into the provider; without it the provider behaves as plain Phase 1. */
+/** Where the learning layer plugs into the provider; without it nothing is learned or adapted. */
 export interface LearningHooks {
   /** True when automatic suggestions are muted for this language and cursor context. */
   isSuppressed(languageId: string, context: TriggerContext): boolean;

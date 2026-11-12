@@ -49,7 +49,7 @@ test('takeSuffix keeps the rest of the line plus the next N lines', () => {
   assert.equal(takeSuffix('', 20, 1000), '');
 });
 
-test('message layout matches the spec', () => {
+test('message layout: hints first, then the file with the cursor marked', () => {
   const built = buildPrompt(input());
   assert.equal(
     built.text,

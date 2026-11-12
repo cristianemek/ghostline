@@ -136,8 +136,8 @@ test('examples: duplicates are stored once, blanks never, and clear wipes everyt
 test('examples: corrupt stored data is ignored', () => {
   const backing = memoryStore();
   backing.data.set('ghostline.examples.v2', { ts: [null, { before: 1 }, { before: 'x', accepted: 'y', at: 1 }], py: 'nope' });
-  // What was stored before v0.9, the moment it was accepted and never checked, is dropped.
-  backing.data.set('ghostline.examples.v1', { go: [{ before: 'c.queries.ListContextMessages(', accepted: 'ctx, conversationID, nil', at: 1 }] });
+  // What early versions stored the moment it was accepted, never checked, is dropped.
+  backing.data.set('ghostline.examples.v1', { go: [{ before: 'c.queries.ListOrderItems(', accepted: 'ctx, orderID, nil', at: 1 }] });
   const store = new ExampleStore(backing);
   assert.equal(store.count('ts'), 1);
   assert.equal(store.count('py'), 0);
@@ -264,9 +264,9 @@ test('learning: an accepted suggestion that stays in the file becomes an example
 
 test('learning: a suggestion that was accepted and then fixed or removed never becomes an example', () => {
   const { learning, examples, documents } = createLearning();
-  // Seen in real use: three arguments accepted for a method that takes two, then corrected by hand.
-  documents.set('file:///core.go', 'c.queries.ListContextMessages(ctx, conversationID)\n');
-  learning.onAccepted(suggestion({ documentKey: 'file:///core.go', languageId: 'go', before: '\tc.queries.ListContextMessages(', text: 'ctx, conversationID, nil' }));
+  // Three arguments accepted for a method that takes two, then corrected by hand.
+  documents.set('file:///core.go', 'c.queries.ListOrderItems(ctx, orderID)\n');
+  learning.onAccepted(suggestion({ documentKey: 'file:///core.go', languageId: 'go', before: '\tc.queries.ListOrderItems(', text: 'ctx, orderID, nil' }));
   learning.confirmPending();
   assert.equal(examples.count(), 0);
   // The file was closed in the meantime: nothing to check against.
@@ -274,8 +274,8 @@ test('learning: a suggestion that was accepted and then fixed or removed never b
   learning.confirmPending();
   assert.equal(examples.count(), 0);
   // A formatter that realigns what was accepted does not count as a change.
-  documents.set('file:///core.go', '\tChannel:      in.Channel,\n\tProfile:      defaultProfile,\n');
-  learning.onAccepted(suggestion({ documentKey: 'file:///core.go', languageId: 'go', before: '\t', text: 'Channel: in.Channel,\n\tProfile: defaultProfile,' }));
+  documents.set('file:///core.go', '\tKind:      in.Kind,\n\tTier:      defaultTier,\n');
+  learning.onAccepted(suggestion({ documentKey: 'file:///core.go', languageId: 'go', before: '\t', text: 'Kind: in.Kind,\n\tTier: defaultTier,' }));
   learning.confirmPending();
   assert.equal(examples.count('go'), 1);
 });
