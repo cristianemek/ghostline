@@ -51,6 +51,8 @@ const STANDBY_MAX_IDLE_MS = 10 * 60_000;
 const FLUSH_INTERVAL_MS = 15_000;
 const CLI_RETRY_MS = 30_000;
 const SPEED_WARNING_KEY = 'ghostline.speedWarning.v1';
+/** The API key source the user has been told about: billing by use is said once, not at every start. */
+const API_KEY_NOTICE_KEY = 'ghostline.apiKeyNotice.v1';
 /** The server other than Anthropic's that the user has said is theirs. */
 const ENDPOINT_ACK_KEY = 'ghostline.endpointAck.v1';
 /** Successful requests needed before today's median latency is worth acting on. */
@@ -299,9 +301,9 @@ class Ghostline implements vscode.Disposable {
     this.cliError = undefined;
     const { config } = this;
     // Say it before the first request is billed, not after: with one of these variables set the CLI
-    // authenticates against the API instead of the subscription.
+    // authenticates with a key, and each suggestion is billed by use.
     for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) {
-      if (process.env[name]) this.warnAboutApiKey(name);
+      if (process.env[name]) this.noteApiKey(name);
     }
     this.warnAboutEndpoint();
     try {
@@ -481,23 +483,29 @@ class Ghostline implements vscode.Disposable {
           `(tools: ${info.tools.length}, mcp_servers: ${info.mcpServers.length}); deberían ser listas vacías.`,
       );
     }
-    if (usesApiKey(info.apiKeySource)) this.warnAboutApiKey(info.apiKeySource);
+    if (usesApiKey(info.apiKeySource)) this.noteApiKey(info.apiKeySource);
     this.queueRender();
   }
 
-  private warnAboutApiKey(source: string): void {
+  /**
+   * With an API key (the recommended way to use ghostline) every suggestion is billed by use. That
+   * is worth knowing before the first one, and worth saying once: until the user has read it.
+   */
+  private noteApiKey(source: string): void {
     if (this.warnedKeySources.has(source)) return;
     this.warnedKeySources.add(source);
-    this.log(`AVISO: la CLI se autentica con ${source}, no con la suscripción.`);
+    this.log(`la CLI se autentica con una API key (${source}): cada sugerencia se factura por uso.`);
+    if (this.context.globalState.get<string>(API_KEY_NOTICE_KEY) === source) return;
     void vscode.window
-      .showWarningMessage(
-        `ghostline: la CLI de Claude Code está usando una API key (${source}). ` +
-          'Cada sugerencia se factura en la API en lugar de ir contra tu suscripción.',
-        'Pausar ghostline',
+      .showInformationMessage(
+        `ghostline: la CLI se autentica con una API key (${source}), así que cada sugerencia se factura por uso. ` +
+          'Lo gastado hoy está en la barra de estado.',
         'Entendido',
+        'Pausar ghostline',
       )
       .then((choice) => {
         if (choice === 'Pausar ghostline' && !this.paused) this.togglePause();
+        if (choice === 'Entendido') void this.context.globalState.update(API_KEY_NOTICE_KEY, source);
       });
   }
 
@@ -782,7 +790,7 @@ class Ghostline implements vscode.Disposable {
     this.statusBar.tooltip = tooltip;
     this.statusBar.backgroundColor = session.cliError
       ? new vscode.ThemeColor('statusBarItem.errorBackground')
-      : usesApiKey(session.apiKeySource) || session.limitReached || session.trouble
+      : session.limitReached || session.trouble
         ? new vscode.ThemeColor('statusBarItem.warningBackground')
         : undefined;
   }

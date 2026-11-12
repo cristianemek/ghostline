@@ -3,9 +3,10 @@ import { test } from 'node:test';
 import { buildCliArgs, buildCliEnv, endpointOverride, userMessageLine } from '../../src/cli/args';
 import { formatRequestLine } from '../../src/usage/requestLog';
 import {
-  BAR_CELL,
+  METER_WIDTH,
   TOOLTIP_COMMANDS,
   dayRow,
+  meterStops,
   plainStatus,
   sessionStart,
   statusText,
@@ -149,24 +150,30 @@ test('status bar text: share of ghostline’s own daily cap · share of a Claude
   assert.equal(plainStatus(statusText(busyDay(), { ...session, cliError: 'no claude' })), 'ghostline sin CLI');
 });
 
-test('tooltip: name and state, the three figures with their meters, warnings, and shortcuts', () => {
-  /** How many cells of a meter are drawn in a colour of the theme. */
-  const cells = (markdown: string, colour: string): number[] =>
-    [...markdown.matchAll(new RegExp(`color:var\\(--vscode-${colour}\\);">(${BAR_CELL}+)<`, 'g'))].map((match) => (match[1] as string).length);
+test('tooltip: name and state, the figures with their drawings, warnings, and shortcuts', () => {
+  /** The drawings of a tooltip, decoded: it carries them as inline SVG images. */
+  const drawings = (markdown: string): string[] =>
+    [...markdown.matchAll(/\]\(data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)\)/g)].map((match) => Buffer.from(match[1] as string, 'base64').toString('utf8'));
+  /** Its meters: for each, the widths of the bars drawn over the track, in the order they are drawn. */
+  const meters = (markdown: string): number[][] =>
+    drawings(markdown)
+      .filter((drawing) => drawing.includes(`viewBox="0 0 ${METER_WIDTH} 8"`))
+      .map((drawing) => [...drawing.matchAll(/<rect width="(\d+)"/g)].slice(1).map((match) => Number(match[1])));
 
   const tooltip = tooltipMarkdown(busyDay(), { ...session, rateLimit });
-  assert.match(tooltip, /^## \$\(ghostline-ghost\)&nbsp; ghostline\n\n.*Autocompletado con Claude · modo auto/);
-  assert.match(tooltip, /^### 8% &nbsp;.*· de tu tope diario/m);
+  assert.match(tooltip, /^## !\[ghostline\]\(data:image\/svg\+xml;base64,[^)]+\)&nbsp; ghostline\n\n.*Con Claude Code · modo auto/);
+  assert.match(tooltip, /^### !\[\]\([^)]+\)&nbsp; 8% &nbsp;.*· de tu tope diario/m);
   assert.match(tooltip, /123 de 1500 peticiones hoy/);
-  assert.match(tooltip, /^### ≈0,04% &nbsp;.*· de la sesión de Claude \(5 h\)/m);
+  assert.match(tooltip, /^### !\[\]\([^)]+\)&nbsp; ≈0,04% &nbsp;.*· de la sesión de Claude \(5 h\)/m);
   assert.match(tooltip, /ghostline: 0,0312 \$ de unos 80 \$ · la sesión entera va por el 59%/);
-  assert.match(tooltip, /^### 34% &nbsp;.*· aceptadas/m);
+  assert.match(tooltip, /^### !\[\]\([^)]+\)&nbsp; 34% &nbsp;.*· aceptadas/m);
   assert.match(tooltip, /34 de 100 sugerencias/);
-  // Each meter is 28 cells: 8% of the cap, ghostline's sliver of a session that is 59% full, 34% accepted.
-  assert.deepEqual(cells(tooltip, 'charts-purple'), [2, 1]);
-  assert.deepEqual(cells(tooltip, 'charts-blue'), [17]);
-  assert.deepEqual(cells(tooltip, 'charts-green'), [10]);
-  assert.deepEqual(cells(tooltip, 'disabledForeground'), [26, 10, 18]);
+  // 300 pixels each: 8% of the cap; a session 59% full, of which ghostline is a sliver (drawn over it); 34% accepted.
+  assert.deepEqual(meters(tooltip), [[25], [185, 8], [102]]);
+  assert.deepEqual(meterStops([{ rate: 0.5 }, { rate: 0.7 }]), [150, 300]);
+  assert.deepEqual(meterStops([{ rate: 0 }, { rate: 0.0001 }, { rate: -1 }]), [0, 8, 8]);
+  // Every drawing is a complete SVG and nothing else: no scripts, no links out.
+  for (const drawing of drawings(tooltip)) assert.match(drawing, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" [^>]+>(?:<(?:rect|circle|path|g|\/g)[^<>]*>)+<\/svg>$/);
   // The shortcuts, and nothing clickable beyond ghostline's own commands.
   assert.match(tooltip, /\[\$\(debug-pause\) Pausar\]\(command:ghostline\.togglePause\)/);
   assert.match(tooltip, /\[\$\(person\) Modo manual\]\(command:ghostline\.toggleTriggerMode\)/);
@@ -179,19 +186,31 @@ test('tooltip: name and state, the three figures with their meters, warnings, an
   // Before the CLI has said anything about the session: ghostline's part only.
   const alone = tooltipMarkdown(busyDay(), session);
   assert.match(alone, /ghostline: 0,0312 \$ de unos 80 \$</);
-  assert.deepEqual(cells(alone, 'charts-blue'), []);
-  // Nothing used, nothing drawn.
-  assert.deepEqual(cells(tooltipMarkdown(emptyDay('2026-11-11'), { ...session, sessionSpentUsd: 0 }), 'charts-purple'), []);
-  assert.match(tooltipMarkdown(busyDay(), { ...session, dailyLimit: 0 }), /^### 123 &nbsp;.*· peticiones hoy[\s\S]*sin tope diario/m);
+  assert.deepEqual(meters(alone)[1], [8]);
+  // Nothing used, nothing drawn over the tracks.
+  assert.deepEqual(meters(tooltipMarkdown(emptyDay('2026-11-11'), { ...session, sessionSpentUsd: 0 })), [[], [], []]);
+  // Without a cap there is a count and no meter for it.
+  const uncapped = tooltipMarkdown(busyDay(), { ...session, dailyLimit: 0 });
+  assert.match(uncapped, /^### !\[\]\([^)]+\)&nbsp; 123 &nbsp;.*· peticiones hoy[\s\S]*sin tope diario/m);
+  assert.equal(meters(uncapped).length, 2);
   // A share too small to put a figure on is not also "about".
-  assert.match(tooltipMarkdown(busyDay(), { ...session, sessionSpentUsd: 0.0005 }), /^### <0,01% &nbsp;/m);
+  assert.match(tooltipMarkdown(busyDay(), { ...session, sessionSpentUsd: 0.0005 }), /&nbsp; <0,01% &nbsp;/);
   assert.match(tooltipMarkdown(busyDay(), { ...session, muted: ['go al final de línea'] }), /Silenciado 24 h: go al final de línea/);
 
-  assert.match(tooltipMarkdown(busyDay(), { ...session, apiKeySource: 'ANTHROPIC_API_KEY' }), /usa una API key \(ANTHROPIC\\_API\\_KEY\)/);
+  // With an API key there is no session to take a share of: what today has cost, in the bar and in the tooltip.
+  const withKey = { ...session, apiKeySource: 'ANTHROPIC_API_KEY' };
+  assert.equal(statusText(busyDay(), withKey), '$(ghostline-ghost) 8% · 0,03 $');
+  assert.equal(statusText({ ...busyDay(), costUsd: 0.004 }, withKey), '$(ghostline-ghost) 8% · <0,01 $');
+  assert.equal(statusText(emptyDay('2026-11-11'), withKey), '$(ghostline-ghost) 0% · 0 $');
+  const keyed = tooltipMarkdown(busyDay(), withKey);
+  assert.match(keyed, /^### !\[\]\([^)]+\)&nbsp; 0,03 \$ &nbsp;.*· gastado hoy en la API/m);
+  assert.match(keyed, /con API key \(ANTHROPIC\\_API\\_KEY\) · 180k tokens/);
+  assert.ok(!keyed.includes('sesión de Claude') && !keyed.includes('$(warning)'), keyed);
+
   assert.match(tooltipMarkdown(busyDay(), { ...session, limitReached: true }), /Límite diario alcanzado \(1500\)/);
   // What did not come from ghostline cannot bring markup, a link or an icon of its own.
   const hostile = tooltipMarkdown(busyDay(), { ...session, cliError: 'no existe C:\\x\\[y](command:evil) <b>$(zap)</b>' });
-  assert.ok(!hostile.includes('](command:evil)') && !hostile.includes('<b>') && !/[^\\]\$\(zap\)<\/b>/.test(hostile), hostile);
+  assert.ok(!hostile.includes('](command:evil)') && !hostile.includes('<b>'), hostile);
   assert.match(hostile, /\\\[y\\\]\\\(command:evil\\\) &lt;b&gt;\\\$\\\(zap\\\)&lt;\/b&gt;/);
 });
 

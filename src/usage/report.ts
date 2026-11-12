@@ -82,7 +82,7 @@ function usd(value: number): string {
   return `${value.toFixed(value < 1 ? 4 : 2).replace('.', ',')} $`;
 }
 
-/** True when the CLI is authenticating with something other than the subscription. */
+/** True when the CLI authenticates with a key (billed by use) and not with the session of a plan. */
 export function usesApiKey(apiKeySource: string | undefined): boolean {
   return apiKeySource !== undefined && apiKeySource !== '' && apiKeySource !== 'none';
 }
@@ -92,13 +92,15 @@ export const MARK = '$(ghostline-ghost)';
 
 /**
  * The ghost, then `8% · Claude 0,03%`: how much of ghostline's own daily cap is used, and how much
- * of a whole Claude session ghostline has taken. When there is something to say about its state, a
- * second icon says it. Tokens, latency and cost are one click away, in the last-7-days list and
+ * of a whole Claude session ghostline has taken (or, with an API key, what today has cost). When
+ * there is something to say about its state, a second icon says it. Tokens, latency and cost are one click away, in the last-7-days list and
  * the log.
  */
 export function statusText(day: DayStats, session: SessionInfo): string {
   if (session.cliError) return `${MARK} $(warning) sin CLI`;
-  const counters = `${dailyShare(day, session.dailyLimit)} · Claude ${sessionShare(session)}`;
+  // With an API key there is no session to take a share of: what today has cost instead.
+  const second = usesApiKey(session.apiKeySource) ? money(day.costUsd) : `Claude ${sessionShare(session)}`;
+  const counters = `${dailyShare(day, session.dailyLimit)} · ${second}`;
   if (session.paused) return `${MARK} $(debug-pause) ${counters}`;
   if (session.trouble) return `${MARK} $(warning) ${counters}`;
   if (session.limitReached) return `${MARK} $(circle-slash) ${counters}`;
@@ -129,49 +131,101 @@ function plain(text: string): string {
     .replace(/[\\`*_[\]()#|$~]/g, '\\$&');
 }
 
-const BAR_CELLS = 28;
-/** Half a block: side by side they make a bar, in any font that has box-drawing characters. */
-export const BAR_CELL = '▄';
-/** The editor only lets a tooltip set colours, and only from the theme: these are its variables. */
-const TRACK = '--vscode-disabledForeground';
+/** Money at a glance: two decimals, and something spent never reads as nothing. */
+function money(value: number): string {
+  if (!(value > 0)) return '0 $';
+  if (value < 0.01) return '<0,01 $';
+  return `${value.toFixed(2).replace('.', ',')} $`;
+}
+
+/** The hues of the tooltip's drawings: flat, a solid tone over a faint one of the same hue. */
+const HUE = { violet: '#A78BFA', teal: '#2DD4BF', blue: '#60A5FA', green: '#4ADE80', yellow: '#FACC15', slate: '#94A3B8', night: '#1E293B' } as const;
+
+/** The editor only lets a tooltip's text take colours of the theme: these are its variables. */
 const tint = (variable: string, text: string): string => `<span style="color:var(${variable});">${text}</span>`;
 const small = (text: string): string => tint('--vscode-descriptionForeground', text);
 
-/** A meter drawn with text: each part takes its share of the cells; something used never takes none. */
-function meter(parts: readonly { rate: number; colour: string }[]): string {
-  let used = 0;
-  let drawn = '';
-  for (const part of parts) {
+const svg = (width: number, height: number, viewBox: string, body: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${viewBox}">${body}</svg>`;
+
+/** A drawing inside the tooltip: an SVG as an inline image, the only graphics a tooltip can carry. */
+function picture(drawing: string, alt: string): string {
+  return `![${alt}](data:image/svg+xml;base64,${Buffer.from(drawing, 'utf8').toString('base64')})`;
+}
+
+export const METER_WIDTH = 300;
+const METER_HEIGHT = 8;
+
+/** Where each part of a meter ends, in pixels: its share of the width, and never nothing for something used. */
+export function meterStops(parts: readonly { rate: number }[], width: number = METER_WIDTH): number[] {
+  let end = 0;
+  return parts.map((part) => {
     const rate = Math.min(1, Math.max(0, part.rate));
-    const cells = Math.min(BAR_CELLS - used, rate > 0 ? Math.max(1, Math.round(rate * BAR_CELLS)) : 0);
-    if (cells > 0) drawn += tint(part.colour, BAR_CELL.repeat(cells));
-    used += cells;
-  }
-  return drawn + (used < BAR_CELLS ? tint(TRACK, BAR_CELL.repeat(BAR_CELLS - used)) : '');
+    end = Math.min(width, end + (rate > 0 ? Math.max(METER_HEIGHT, Math.round(rate * width)) : 0));
+    return end;
+  });
 }
 
+/** A rounded bar: a faint track and, over it, each part in its colour. */
+function meter(parts: readonly { rate: number; colour: string; opacity?: number }[]): string {
+  const bar = (width: number, paint: string): string => `<rect width="${width}" height="${METER_HEIGHT}" rx="${METER_HEIGHT / 2}" ${paint}/>`;
+  const stops = meterStops(parts);
+  // From the last part to the first, each from the left edge, so that every part ends rounded.
+  const filled = parts
+    .map((part, index) => ({ part, end: stops[index] as number, start: index === 0 ? 0 : (stops[index - 1] as number) }))
+    .filter((segment) => segment.end > segment.start)
+    .reverse()
+    .map((segment) => bar(segment.end, `fill="${segment.part.colour}" fill-opacity="${segment.part.opacity ?? 1}"`))
+    .join('');
+  const track = bar(METER_WIDTH, `fill="${HUE.slate}" fill-opacity="0.28"`);
+  return picture(svg(METER_WIDTH, METER_HEIGHT, `0 0 ${METER_WIDTH} ${METER_HEIGHT}`, track + filled), 'medidor');
+}
+
+/** A small round sign for a figure: a faint disc of its hue and a mark drawn in the solid one. */
+const sign = (colour: string, mark: string): string =>
+  svg(
+    16,
+    16,
+    '0 0 16 16',
+    `<circle cx="8" cy="8" r="7" fill="${colour}" fill-opacity="0.35"/>` +
+      `<g fill="none" stroke="${colour}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${mark}</g>`,
+  );
+const SIGNS = {
+  /** ghostline's own icon: the ghost over its line. */
+  ghost: svg(
+    26,
+    26,
+    '0 0 128 128',
+    `<rect x="4" y="4" width="120" height="120" rx="30" fill="${HUE.night}"/>` +
+      `<path d="M34 50a30 30 0 0 1 60 0v30a10 10 0 0 1-20 0 10 10 0 0 1-20 0 10 10 0 0 1-20 0Z" fill="${HUE.violet}"/>` +
+      `<rect x="50" y="43" width="9" height="14" rx="4.5" fill="${HUE.night}"/><rect x="69" y="43" width="9" height="14" rx="4.5" fill="${HUE.night}"/>` +
+      `<rect x="32" y="102" width="64" height="8" rx="4" fill="${HUE.teal}"/>`,
+  ),
+  gauge: sign(HUE.violet, `<path d="M8 8.5 11 5.2"/><circle cx="8" cy="8.5" r="0.9" fill="${HUE.violet}"/>`),
+  clock: sign(HUE.blue, '<path d="M8 4.6V8l2.3 1.5"/>'),
+  coin: sign(HUE.yellow, '<path d="M9.9 6.2C9.6 5.5 8.9 5.1 8 5.1c-1.1 0-1.9.6-1.9 1.4 0 1.8 3.8.9 3.8 2.9 0 .9-.8 1.5-1.9 1.5-.9 0-1.700-.4-2-1.200M8 3.800v8.400" stroke-width="1.3"/>'),
+  check: sign(HUE.green, '<path d="M5 8.3l2.1 2.1 3.9-4.2"/>'),
+};
+
 /**
- * One figure of the tooltip: how much, in large type, and of what; the meter; and the numbers
- * behind it. A tooltip cannot choose a size for its text, only a heading level.
+ * One figure of the tooltip: its sign, how much (in large type: a tooltip cannot choose a size for
+ * its text, only a heading level) and of what; its meter, if it has one; and the numbers behind it.
  */
-function figure(value: string, of: string, bar: string, detail: string): string {
-  return `### ${value} &nbsp;${small(`· ${of}`)}\n\n${bar}  \n${small(detail)}`;
+function figure(drawing: string, value: string, of: string, bar: string, detail: string): string {
+  return `### ${picture(drawing, '')}&nbsp; ${value} &nbsp;${small(`· ${of}`)}\n\n${bar ? `${bar}  \n` : ''}${small(detail)}`;
 }
 
 /**
- * The status bar item's tooltip, as markdown with a little HTML: the name and the state on top,
- * then whatever needs attention, the three figures each with its meter, and the things one would
+ * The status bar item's tooltip, as markdown with drawings: the name and the state on top, then
+ * whatever needs attention, the three figures each with its meter, and the things one would
  * otherwise open the menu for.
  */
 export function tooltipMarkdown(day: DayStats, session: SessionInfo): string {
   const state = session.paused ? 'en pausa' : session.triggerMode === 'manual' ? 'modo manual' : 'modo auto';
-  const blocks: string[] = [`## ${MARK}&nbsp; ghostline`, small(`Autocompletado con Claude · ${state}`)];
+  const blocks: string[] = [`## ${picture(SIGNS.ghost, 'ghostline')}&nbsp; ghostline`, small(`Con Claude Code · ${state}`)];
 
   const warnings: string[] = [];
   if (session.cliError) warnings.push(`$(warning) ${plain(session.cliError)}`);
-  if (usesApiKey(session.apiKeySource)) {
-    warnings.push(`$(warning) La CLI usa una API key (${plain(session.apiKeySource ?? '')}): se factura la API, no la suscripción.`);
-  }
   if (session.trouble) {
     warnings.push(
       `$(warning) Sugerencias automáticas en pausa ${Math.ceil(session.trouble.remainingMs / 1000)} s por errores repetidos de la CLI: ` +
@@ -187,34 +241,50 @@ export function tooltipMarkdown(day: DayStats, session: SessionInfo): string {
   blocks.push(
     session.dailyLimit > 0
       ? figure(
+          SIGNS.gauge,
           dailyShare(day, session.dailyLimit),
           'de tu tope diario',
-          meter([{ rate: day.requests / session.dailyLimit, colour: '--vscode-charts-purple' }]),
+          meter([{ rate: day.requests / session.dailyLimit, colour: HUE.violet }]),
           `${day.requests} de ${session.dailyLimit} peticiones hoy`,
         )
-      : figure(String(day.requests), 'peticiones hoy', meter([]), 'sin tope diario'),
+      : figure(SIGNS.gauge, String(day.requests), 'peticiones hoy', '', 'sin tope diario'),
   );
-  // ghostline's own part of the session and, when the CLI has said it, how full the session is.
-  const whole = session.rateLimit?.windows.five_hour?.utilization;
-  const own = session.sessionBudgetUsd > 0 ? session.sessionSpentUsd / session.sessionBudgetUsd : 0;
-  const ownShare = sessionShare(session);
+  if (usesApiKey(session.apiKeySource)) {
+    // Billed by use: what matters is what today has cost.
+    blocks.push(
+      figure(
+        SIGNS.coin,
+        money(day.costUsd),
+        'gastado hoy en la API',
+        '',
+        `con API key (${plain(session.apiKeySource ?? '')}) · ${formatTokens(totalTokens(day))} tokens`,
+      ),
+    );
+  } else {
+    // ghostline's own part of the session and, when the CLI has said it, how full the session is.
+    const whole = session.rateLimit?.windows.five_hour?.utilization;
+    const own = session.sessionBudgetUsd > 0 ? session.sessionSpentUsd / session.sessionBudgetUsd : 0;
+    const ownShare = sessionShare(session);
+    blocks.push(
+      figure(
+        SIGNS.clock,
+        /^\d/.test(ownShare) && own > 0 ? `≈${ownShare}` : ownShare,
+        'de la sesión de Claude (5 h)',
+        meter([
+          { rate: own, colour: HUE.violet },
+          { rate: whole === undefined ? 0 : Math.max(0, whole - own), colour: HUE.blue, opacity: 0.6 },
+        ]),
+        `ghostline: ${usd(session.sessionSpentUsd)} de unos ${Math.round(session.sessionBudgetUsd)} $` +
+          (whole === undefined ? '' : ` · la sesión entera va por el ${share(whole)}`),
+      ),
+    );
+  }
   blocks.push(
     figure(
-      /^\d/.test(ownShare) && own > 0 ? `≈${ownShare}` : ownShare,
-      'de la sesión de Claude (5 h)',
-      meter([
-        { rate: own, colour: '--vscode-charts-purple' },
-        { rate: whole === undefined ? 0 : Math.max(0, whole - own), colour: '--vscode-charts-blue' },
-      ]),
-      `ghostline: ${usd(session.sessionSpentUsd)} de unos ${Math.round(session.sessionBudgetUsd)} $` +
-        (whole === undefined ? '' : ` · la sesión entera va por el ${share(whole)}`),
-    ),
-  );
-  blocks.push(
-    figure(
+      SIGNS.check,
       percent(acceptanceRate(day)),
       'aceptadas',
-      meter([{ rate: acceptanceRate(day) ?? 0, colour: '--vscode-charts-green' }]),
+      meter([{ rate: acceptanceRate(day) ?? 0, colour: HUE.green }]),
       `${day.accepted} de ${day.shown} sugerencias`,
     ),
   );

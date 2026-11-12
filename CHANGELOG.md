@@ -1,5 +1,15 @@
 # Cambios
 
+## 0.14.0
+
+- Popup de la barra de estado rehecho: icono y nombre, cada cifra en grande con su signo y su barra, y
+  accesos directos (pausar, cambiar de modo, consumo, últimas sugerencias, ajustes).
+- Con API key, la barra y el popup muestran lo gastado hoy en lugar de la parte de la sesión. El aviso de
+  que se factura por uso pasa a ser informativo y se da una sola vez.
+- Licencia MIT y aviso legal. ghostline se presenta como lo que es: una extensión que usa la CLI de tu
+  agente de IA (de momento, Claude Code), con API key como vía recomendada.
+- Colores del icono alineados con los del popup.
+
 ## 0.13.1
 
 - JSX, HTML y plantillas: lo que sigue a una etiqueta abierta queda un nivel más adentro y su cierre

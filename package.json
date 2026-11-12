@@ -1,8 +1,8 @@
 {
   "name": "ghostline",
   "displayName": "ghostline",
-  "description": "Autocompletado inline (texto fantasma) con Claude, a través de la CLI de Claude Code que ya tienes instalada.",
-  "version": "0.13.1",
+  "description": "Autocompletado inline (texto fantasma) con tu agente de IA: usa la CLI que ya tienes instalada. De momento, Claude Code.",
+  "version": "0.14.0",
   "icon": "resources/icon.png",
   "galleryBanner": {
     "color": "#1e1e2e",
@@ -17,7 +17,7 @@
   ],
   "private": true,
   "publisher": "cristianemek",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/cristianemek/ghostline.git"
@@ -36,11 +36,11 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "ghostline lanza la CLI de Claude Code y envía a Anthropic fragmentos del archivo abierto; solo funciona en áreas de trabajo de confianza."
+      "description": "ghostline lanza la CLI de tu agente de IA y envía a su proveedor fragmentos del archivo abierto; solo funciona en áreas de trabajo de confianza."
     },
     "virtualWorkspaces": {
       "supported": false,
-      "description": "ghostline necesita lanzar un proceso local (la CLI de Claude Code)."
+      "description": "ghostline necesita lanzar un proceso local (la CLI de tu agente de IA)."
     }
   },
   "contributes": {
@@ -251,7 +251,7 @@
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "Ruta al ejecutable de Claude Code. Vacío: se busca `claude` en el `PATH`.",
+            "markdownDescription": "Ruta al ejecutable de la CLI de tu agente (hoy, Claude Code). Vacío: se busca `claude` en el `PATH`.",
             "order": 1
           },
           "ghostline.effort": {
@@ -396,7 +396,7 @@
     "bench:typing": "node esbuild.mjs && node test/e2e/run.js --typing",
     "check": "npm run typecheck && npm run lint && npm test",
     "vscode:prepublish": "npm run build:prod",
-    "package": "vsce package --no-dependencies --skip-license",
+    "package": "vsce package --no-dependencies",
     "audit": "npm audit --audit-level=low"
   },
   "devDependencies": {

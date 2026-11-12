@@ -1,23 +1,32 @@
 # ghostline
 
-Autocompletado inline (texto fantasma) para VS Code con Claude. No trae modelo ni servidor propios: lanza la
-CLI de [Claude Code](https://claude.com/claude-code) que ya tienes instalada, con la sesión que tengas
-iniciada en ella.
+Autocompletado inline (texto fantasma) para VS Code con tu agente de IA. No trae modelo ni servidor
+propios: lanza la herramienta de línea de comandos que ya tienes instalada, con la sesión o la clave que
+tengas configurada en ella.
 
-> Extensión no oficial, sin relación con Anthropic. Lo que consume cuenta contra tu plan de Claude y está
-> sujeto a los términos de Anthropic.
+De momento funciona con un solo agente: la CLI de [Claude Code](https://claude.com/claude-code).
+
+> Proyecto independiente, sin relación con Anthropic ni respaldo suyo. Lee el [aviso legal](#aviso-legal)
+> antes de usarlo.
 
 ## Requisitos
 
 - VS Code 1.144 o posterior.
-- Claude Code instalado y con la sesión iniciada (`claude` y, dentro, `/login`).
+- Claude Code instalado y autenticado.
+
+**Recomendado: con una API key.** Es la vía que Anthropic indica para las herramientas de terceros. Inicia
+sesión en Claude Code con tu cuenta de la Claude Console o define `ANTHROPIC_API_KEY` en el entorno desde
+el que abres VS Code; cada sugerencia se factura por uso.
+
+ghostline usa la sesión que tenga la CLI, sea cual sea, así que también funciona con la de un plan de pago.
+Si es tu caso, comprueba antes que los términos de tu plan lo permiten: esa decisión es tuya.
 
 ## Instalación
 
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.13.1.vsix
+code --install-extension ghostline-0.14.0.vsix
 ```
 
 Si la barra de estado dice «sin CLI», pon en `ghostline.cliPath` la ruta del ejecutable (lo que devuelva
@@ -29,9 +38,9 @@ Si la barra de estado dice «sin CLI», pon en `ghostline.cliPath` la ruta del e
 - `Alt+\` (`Alt+ç` en teclado español) la pide a mano.
 - **Correcciones**: cuando el compilador marca errores junto al cursor, ghostline propone el bloque corregido
   encima del código. `Tab` lo aplica, `Esc` lo descarta.
-- **Barra de estado**: junto al fantasma, `8% · Claude 0,5%` es lo que llevas de tu tope diario y la parte
-  de una sesión de Claude (5 h) que se ha llevado ghostline. Con un clic: pausar, cambiar de modo, ver el
-  consumo, el log y las últimas sugerencias.
+- **Barra de estado**: junto al fantasma, lo que llevas de tu tope diario y lo que ha gastado ghostline.
+  Al pasar el ratón, el detalle; con un clic, pausar, cambiar de modo, ver el consumo, el log y las últimas
+  sugerencias.
 
 ## Ajustes principales
 
@@ -49,13 +58,13 @@ El resto está en *Ajustes → ghostline → Avanzado*.
 
 ## Privacidad y seguridad
 
-- **Qué se envía a Anthropic** (lo envía la CLI): hasta 60 líneas antes y 20 después del cursor y, con
-  `ghostline.context.symbols`, nombres y tipos declarados en otros archivos del proyecto. Nunca valores ni
-  cuerpos de función.
+- **Qué se envía al proveedor de tu agente** (lo envía su CLI): hasta 60 líneas antes y 20 después del
+  cursor y, con `ghostline.context.symbols`, nombres y tipos declarados en otros archivos del proyecto.
+  Nunca valores ni cuerpos de función.
 - **Qué no se envía nunca**: los archivos excluidos (`.env`, claves, credenciales…). Un repositorio puede
   añadir exclusiones, no quitarlas.
-- **Credenciales**: ghostline no lee, guarda ni transmite tu sesión ni tus claves; solo las usa la CLI de
-  Claude Code. No tiene servidor, telemetría ni conexiones de red propias.
+- **Credenciales**: ghostline no lee, guarda ni transmite tu sesión ni tus claves; solo las usa la CLI de tu
+  agente. No tiene servidor, telemetría ni conexiones de red propias.
 - La CLI se lanza sin shell, sin herramientas (el modelo no puede leer, editar ni ejecutar nada) y en una
   carpeta vacía propia, nunca en tu proyecto: un repositorio no puede cambiar qué se ejecuta ni a dónde van
   las peticiones.
@@ -65,6 +74,17 @@ El resto está en *Ajustes → ghostline → Avanzado*.
 
 El detalle, y cómo avisar de un fallo de seguridad, en `SECURITY.md`.
 
+## Aviso legal
+
+- ghostline es un proyecto independiente. No está afiliado a Anthropic ni a ningún otro proveedor de IA, ni
+  cuenta con su respaldo o patrocinio. «Claude» y «Claude Code» son marcas de Anthropic.
+- ghostline no da acceso a ningún servicio de IA ni lo revende: se limita a ejecutar en tu equipo, sin
+  modificarla, la herramienta que tú has instalado y autenticado.
+- Usarla a través de ghostline consume tu cuenta y queda sujeto a los términos y políticas de tu proveedor.
+  Comprobar que tu forma de usarlo los cumple, y asumir lo que cueste, es responsabilidad tuya.
+- El software se ofrece tal cual, sin garantía de ningún tipo. Su autor no responde de daños, costes ni de
+  limitaciones o cierres de cuenta derivados de su uso. Las condiciones completas están en `LICENSE`.
+
 ## Desarrollo
 
 ```
@@ -73,4 +93,4 @@ npm run test:e2e   # VS Code real en un perfil aislado, con la CLI simulada
 npm run package    # genera el .vsix
 ```
 
-Sin dependencias de runtime.
+Sin dependencias de runtime. Licencia MIT.
