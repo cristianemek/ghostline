@@ -135,10 +135,14 @@ test('examples: duplicates are stored once, blanks never, and clear wipes everyt
 
 test('examples: corrupt stored data is ignored', () => {
   const backing = memoryStore();
-  backing.data.set('ghostline.examples.v1', { ts: [null, { before: 1 }, { before: 'x', accepted: 'y', at: 1 }], py: 'nope' });
+  backing.data.set('ghostline.examples.v2', { ts: [null, { before: 1 }, { before: 'x', accepted: 'y', at: 1 }], py: 'nope' });
+  // What was stored before v0.9, the moment it was accepted and never checked, is dropped.
+  backing.data.set('ghostline.examples.v1', { go: [{ before: 'c.queries.ListContextMessages(', accepted: 'ctx, conversationID, nil', at: 1 }] });
   const store = new ExampleStore(backing);
   assert.equal(store.count('ts'), 1);
   assert.equal(store.count('py'), 0);
+  assert.equal(store.count('go'), 0);
+  assert.equal(backing.data.get('ghostline.examples.v1'), undefined);
 });
 
 // --- adaptive trigger ---------------------------------------------------------------------------
@@ -224,6 +228,9 @@ function createLearning(settings = { learningExamples: true, adaptiveTrigger: tr
   const examples = new ExampleStore(memoryStore());
   const adaptive = new AdaptiveTrigger(memoryStore());
   const muted: string[] = [];
+  /** What each open document contains now. */
+  const documents = new Map<string, string>([['file:///a.ts', 'const orders = await orderService.list(filters);\nreturn orders.items;\n']]);
+  const scheduled: { task: () => void; ms: number }[] = [];
   const learning = new Learning({
     examples,
     adaptive,
@@ -231,17 +238,46 @@ function createLearning(settings = { learningExamples: true, adaptiveTrigger: tr
     settings: () => settings,
     charsPerToken: () => 2.7,
     onMuted: (languageId, context) => muted.push(`${languageId}:${context}`),
+    readDocument: (documentKey) => documents.get(documentKey),
+    later: (task, ms) => scheduled.push({ task, ms }),
   });
-  return { learning, examples, adaptive, muted };
+  return { learning, examples, adaptive, muted, documents, scheduled };
 }
 
-test('learning: an accepted suggestion becomes an example for similar code', () => {
-  const { learning, examples } = createLearning({ learningExamples: true, adaptiveTrigger: true }, '- Use single quotes.');
+test('learning: an accepted suggestion that stays in the file becomes an example for similar code', () => {
+  const { learning, examples, scheduled } = createLearning({ learningExamples: true, adaptiveTrigger: true }, '- Use single quotes.');
   learning.onAccepted(suggestion());
+  // Not yet: accepting is not approving.
+  assert.equal(examples.count('typescript'), 0);
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0]?.ms, 10 * 60_000);
+  scheduled[0]?.task();
   assert.equal(examples.count('typescript'), 1);
   const extras = learning.promptExtras('typescript', 'const orders = await orderService.list(query);\n');
   assert.equal(extras.styleProfile, '- Use single quotes.');
   assert.deepEqual(extras.examples, [{ before: suggestion().before, accepted: 'return orders.items;' }]);
+  // The same check a second time (timer and confirmPending both firing) adds nothing.
+  scheduled[0]?.task();
+  learning.confirmPending();
+  assert.equal(examples.count('typescript'), 1);
+});
+
+test('learning: a suggestion that was accepted and then fixed or removed never becomes an example', () => {
+  const { learning, examples, documents } = createLearning();
+  // Seen in real use: three arguments accepted for a method that takes two, then corrected by hand.
+  documents.set('file:///core.go', 'c.queries.ListContextMessages(ctx, conversationID)\n');
+  learning.onAccepted(suggestion({ documentKey: 'file:///core.go', languageId: 'go', before: '\tc.queries.ListContextMessages(', text: 'ctx, conversationID, nil' }));
+  learning.confirmPending();
+  assert.equal(examples.count(), 0);
+  // The file was closed in the meantime: nothing to check against.
+  learning.onAccepted(suggestion({ documentKey: 'file:///closed.ts' }));
+  learning.confirmPending();
+  assert.equal(examples.count(), 0);
+  // A formatter that realigns what was accepted does not count as a change.
+  documents.set('file:///core.go', '\tChannel:      in.Channel,\n\tProfile:      defaultProfile,\n');
+  learning.onAccepted(suggestion({ documentKey: 'file:///core.go', languageId: 'go', before: '\t', text: 'Channel: in.Channel,\n\tProfile: defaultProfile,' }));
+  learning.confirmPending();
+  assert.equal(examples.count('go'), 1);
 });
 
 test('learning: with examples turned off nothing is stored or sent', () => {

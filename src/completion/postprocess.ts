@@ -87,6 +87,43 @@ const CHATTER = [
   /^(sorry\b|as an ai\b|note:|explanation:)/i,
 ];
 
+/**
+ * Tags of the prompt itself: an answer that carries one is the model echoing its instructions, not
+ * code. Only the ones no real code is likely to contain (<style> or <example> could be).
+ */
+const PROMPT_ECHO = /<\/?(?:prefix|suffix|symbols|accepted)>|<file path=/;
+/** Languages where a closing tag is ordinary code. */
+const MARKUP_LANGUAGES = new Set([
+  'html',
+  'xml',
+  'xsl',
+  'svg',
+  'vue',
+  'svelte',
+  'astro',
+  'php',
+  'javascriptreact',
+  'typescriptreact',
+  'handlebars',
+  'jinja',
+  'django-html',
+  'erb',
+  'razor',
+  'markdown',
+  'mdx',
+]);
+
+/**
+ * "ctx, conversationID</parameter>": a closing tag left over from the model's own answer format. Where
+ * tags are not code, and nothing in the completion opens it, it goes.
+ */
+function removeStrayClosingTag(text: string, languageId: string | undefined): string {
+  if (languageId && MARKUP_LANGUAGES.has(languageId)) return text;
+  const stray = /<\/([A-Za-z][\w-]*)>\s*$/.exec(text);
+  if (!stray || text.includes(`<${stray[1] as string}`)) return text;
+  return text.slice(0, stray.index);
+}
+
 function leadingWhitespace(line: string): string {
   return /^[ \t]*/.exec(line)?.[0] ?? '';
 }
@@ -129,7 +166,25 @@ export function stripCodeFences(text: string, lineContent = ''): string {
     const templateLiteral = EXPECTS_EXPRESSION.test(lineContent) && content.includes('${');
     if (!templateLiteral) return content.replace(/\\`/g, '`');
   }
+  // The same wrapper around several lines: `if err != nil {⏎ … ⏎}⏎`. No statement starts with a
+  // backtick, so unless the line is waiting for a value (where it could be a raw string or a
+  // template literal) it is markdown.
+  const block = /^`([^`]+)`$/.exec(out.trim());
+  if (block?.[1]?.includes('\n') && !EXPECTS_EXPRESSION.test(lineContent)) return block[1];
   return out;
+}
+
+/** Go: a composite literal of a named type ("gen.Params{", "&Item{"), not of a slice or a map of them. */
+const GO_NAMED_LITERAL = /(?:^|[^\w\][.*])[A-Za-z_][\w.]*\{$/;
+
+/**
+ * "…CreateMessageParams{" + "{ConversationID: id, …}": the model wrote again the brace the cursor
+ * comes right after. In a literal of a named type nothing can start with another brace, so it goes;
+ * the matching closer is left to the suffix check. (In "[]Item{" a second brace opens an element.)
+ */
+function removeRestatedOpener(text: string, linePrefix: string, languageId: string | undefined): string {
+  if (languageId !== 'go' || !text.startsWith('{') || !GO_NAMED_LITERAL.test(linePrefix)) return text;
+  return text.slice(1);
 }
 
 /** Prose as a whole (not line by line): mostly plain words. */
@@ -163,13 +218,37 @@ function isChatter(text: string, lineContent: string): boolean {
  * The model second-guessing itself in the middle of an answer:
  * "status === 'success') day.errors++... wait — the completion should be …".
  */
-const SELF_TALK = /(?:\.{3}|…)\s*wait\b|\bwait\s*[—–]|\bthe (?:completion|answer|cursor) (?:should|is|would|must|sits)\b|\bno, the\b/i;
+const SELF_TALK = new RegExp(
+  [
+    // "…++... wait — the completion should be", "status := ... no; the function ends after…"
+    String.raw`(?:\.{3}|…)\s*(?:wait|no|actually|hmm|hold on|sorry|oops|scratch that)\b`,
+    // An ellipsis followed by plain words is a sentence; in code "..." is glued to a name or stands alone.
+    String.raw`(?:\.{3}|…)\s+[a-z]+[;,:]?\s+[a-z]+\s+[a-z]+`,
+    String.raw`\bwait\s*[—–]`,
+    // slog.Error("log slog.Error"? No —
+    String.raw`\?\s*no\b\s*[—–.;]`,
+    String.raw`\bno\s*[—–]`,
+    String.raw`\bno[,;] the\b`,
+  ].join('|'),
+  'i',
+);
+/** The model describing its answer after giving it: the answer stands, the description goes. */
+const AFTERTHOUGHT = /\bthe (?:completion|answer|cursor) (?:should|is|would|must|sits)\b/i;
 
-/** Keeps what came before the model started talking to itself. */
+/**
+ * The model talking to itself in the middle of an answer means it is doubting what it has just
+ * written, so nothing of that answer is offered. (The part before the doubt used to be kept; in real
+ * use it was a draft the model was about to take back: `slog.Error("log slog.Error"? No —`.) A plain
+ * description after the code is only cut off. Inside a comment, or a string of the completion
+ * ("loading ... please wait a bit"), the same words are text.
+ */
 function cutAtSelfTalk(text: string, prefix: string, lineContent: string): string {
   if (COMMENT_START.test(lineContent) || insideCommentBlock(prefix)) return text;
-  const talk = SELF_TALK.exec(text);
-  return talk ? text.slice(0, talk.index) : text;
+  const outsideString = (index: number): boolean => (text.slice(0, index).match(/["'`]/g)?.length ?? 0) % 2 === 0;
+  const doubt = SELF_TALK.exec(text);
+  if (doubt && outsideString(doubt.index)) return '';
+  const afterthought = AFTERTHOUGHT.exec(text);
+  return afterthought && outsideString(afterthought.index) ? text.slice(0, afterthought.index) : text;
 }
 
 /** An English sentence rather than code: mostly plain words, with sentence punctuation. */
@@ -424,6 +503,36 @@ export function trimAgainstSuffix(text: string, prefix: string, suffix: string, 
 }
 
 /**
+ * With the cursor in the middle of a line the model is asked for the whole line as it should read,
+ * which it gets right far more often than the bare insertion (measured: docs/acierto.md). Returns
+ * what must be inserted at the cursor to turn the current line into that one, or '' when the answer
+ * does not keep what is on both sides of the cursor: that would be an edit, not a completion.
+ */
+export function insertionFromLine(answer: string, before: string, after: string): string {
+  const line = firstLine(answer);
+  const head = before.trimStart();
+  const tail = after.trimEnd();
+  if (line.length <= head.length + tail.length || !line.startsWith(head) || !line.endsWith(tail)) return '';
+  return line.slice(head.length, line.length - tail.length);
+}
+
+function firstLine(answer: string): string {
+  const cleaned = stripCodeFences(answer.replace(/\r\n?/g, '\n')).replace(/▮/g, '');
+  return (cleaned.split('\n').find((candidate) => candidate.trim() !== '') ?? '').trim();
+}
+
+/**
+ * The same for an answer that is still arriving: what it would insert so far, '' while it has not
+ * got past the text before the cursor, or null once it is clearly writing some other line.
+ */
+export function insertionSoFar(partial: string, before: string): string | null {
+  const line = firstLine(partial);
+  const head = before.trimStart();
+  if (line.startsWith(head)) return line.slice(head.length);
+  return head.startsWith(line) ? '' : null;
+}
+
+/**
  * True once a streamed answer is clearly longer than anything that would be shown, so the request
  * can be cut short instead of paying for output that gets thrown away. The margin covers what the
  * post-processing may still remove (a code fence, a restated line, leading blank lines).
@@ -464,6 +573,8 @@ export function postprocess(input: PostprocessInput): string {
   let text = input.raw.replace(/\r\n?/g, '\n');
   text = extractMarkedAnswer(text);
   text = stripCodeFences(text, lineContent).replace(/<cursor\s*\/>/g, '');
+  if (PROMPT_ECHO.test(text)) return '';
+  text = removeStrayClosingTag(text, input.languageId);
   // Indentation spelled out as escapes ("\s\s\s'csv',") instead of real whitespace.
   text = text.replace(/^(?:\\[st])+/, '');
   if (isChatter(text, lineContent)) return '';
@@ -486,6 +597,7 @@ export function postprocess(input: PostprocessInput): string {
     } else {
       if (/\s$/.test(linePrefix)) text = text.replace(/^[ \t]+/, '');
       text = removePrefixOverlap(text, linePrefix);
+      text = removeRestatedOpener(text, linePrefix, input.languageId);
     }
   }
   if (!text.trim()) return '';

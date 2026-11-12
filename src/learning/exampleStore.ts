@@ -26,7 +26,12 @@ export interface SelectOptions {
  */
 export const DEFAULT_SELECT: Omit<SelectOptions, 'charsPerToken'> = { max: 2, maxTokens: 300, minSimilarity: 0.12 };
 
-const STORE_KEY = 'ghostline.examples.v1';
+const STORE_KEY = 'ghostline.examples.v2';
+/**
+ * Up to v0.8 a suggestion was stored the moment it was accepted, right or wrong. Those examples
+ * cannot be told apart now, so they are dropped.
+ */
+const UNVERIFIED_KEY = 'ghostline.examples.v1';
 const MAX_PER_LANGUAGE = 200;
 const MAX_FIELD_CHARS = 600;
 /** Characters the prompt adds around each example (tags and line breaks). */
@@ -39,9 +44,10 @@ function isStored(value: unknown): value is StoredExample {
 }
 
 /**
- * The completions the user accepted, per language, kept in the workspace state (local only). A couple
- * of the ones most similar to what is being typed go into each prompt as few-shot examples: that is
- * how ghostline "learns" without any model training.
+ * The completions the user accepted and kept, per language, in the workspace state (local only). A
+ * couple of the ones most similar to what is being typed go into each prompt as few-shot examples:
+ * that is how ghostline "learns" without any model training. Off by default since v0.9: measured on
+ * real calls, they made the model copy the shape of the example over the declaration in front of it.
  */
 export class ExampleStore {
   private byLanguage = new Map<string, StoredExample[]>();
@@ -52,6 +58,7 @@ export class ExampleStore {
     private readonly store: KeyValueStore,
     private readonly now: () => number = Date.now,
   ) {
+    if (store.get<unknown>(UNVERIFIED_KEY) !== undefined) void store.update(UNVERIFIED_KEY, undefined);
     const raw = store.get<unknown>(STORE_KEY);
     if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
       for (const [languageId, list] of Object.entries(raw as Record<string, unknown>)) {

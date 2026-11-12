@@ -101,7 +101,8 @@ export function readConfig(): GhostlineConfig {
     enabled: user('enabled') !== false && workspace('enabled').every((value) => value !== false),
     cliPath: String(user('cliPath') ?? ''),
     model: SAFE_MODEL.test(model) ? model : 'haiku',
-    effort: oneOf(user('effort'), ['low', 'medium', 'high', 'xhigh', 'max'] as const, 'low'),
+    // "medium" since v0.9: on real calls it took Haiku from 7 to 14 right out of 16 for ~12 % more per request.
+    effort: oneOf(user('effort'), ['low', 'medium', 'high', 'xhigh', 'max'] as const, 'medium'),
     // …and can ask for manual mode, not force automatic requests.
     triggerMode:
       oneOf(user('triggerMode'), ['auto', 'manual'] as const, 'auto') === 'manual' || workspace('triggerMode').includes('manual')
@@ -137,7 +138,7 @@ export function readConfig(): GhostlineConfig {
     suffixLines: Math.min(suffixLines, ...workspace('context.suffixLines').map((value) => Math.floor(number(value, suffixLines)))),
     // On unless the user switches it off; a workspace can switch it off, never on.
     symbolContext: user('context.symbols') !== false && workspace('context.symbols').every((value) => value !== false),
-    learningExamples: user('learning.examples') !== false,
+    learningExamples: user('learning.examples') === true,
     adaptiveTrigger: user('learning.adaptiveTrigger') !== false,
     logPrompts: user('debug.logPrompts') === true,
   };

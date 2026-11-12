@@ -31,7 +31,7 @@ Con Node 20 o posterior:
 ```
 npm install
 npm run package
-code --install-extension ghostline-0.8.1.vsix
+code --install-extension ghostline-0.9.0.vsix
 ```
 
 ### En otro equipo (Ubuntu u otro Linux)
@@ -40,10 +40,10 @@ El repositorio es privado y no hay nada publicado, así que el `.vsix` se copia 
 
 1. Claude Code con tu suscripción: `npm install -g @anthropic-ai/claude-code`, luego `claude` y `/login`.
 2. La extensión, de una de estas dos formas:
-   - copia `ghostline-0.8.1.vsix` (unos 55 KB) al otro equipo; o
+   - copia `ghostline-0.9.0.vsix` (unos 55 KB) al otro equipo; o
    - genérala allí: `git clone https://github.com/cristianemek/ghostline.git`, y dentro `npm install` y
      `npm run package`.
-3. `code --install-extension ghostline-0.8.1.vsix` y recarga la ventana.
+3. `code --install-extension ghostline-0.9.0.vsix` y recarga la ventana.
 
 Si la barra de estado dice «sin CLI», VS Code no ha heredado el `PATH` de tu terminal: pon en
 `ghostline.cliPath` lo que devuelva `which claude`. Ese ajuste es por equipo y no se sincroniza. Lo aprendido
@@ -74,6 +74,9 @@ Windows.
   Al hacer clic: pausar, cambiar de modo, abrir el log, ver los últimos 7 días, reiniciar contadores.
 - **Log**: canal de salida *ghostline*, una línea por petición (espera, primer token, total, tokens, resultado).
   Los prompts no se registran salvo con `ghostline.debug.logPrompts`.
+- **Últimas sugerencias** (*ghostline: Ver las últimas sugerencias*, o desde el menú): las últimas 40
+  respuestas de este proyecto, con la línea donde estaba el cursor, lo que se ofreció, lo que respondió el
+  modelo cuando no coincide, y si la aceptaste. Para ver por qué una sugerencia salió mal.
 
 ## Cómo gasta tan poco
 
@@ -92,17 +95,21 @@ Windows.
 
 No se entrena ningún modelo: ghostline se adapta con datos guardados solo en este equipo.
 
-- **Ejemplos**: recuerda las últimas 200 sugerencias que aceptas por lenguaje y envía hasta 2 parecidas a lo
-  que estás escribiendo.
+- **Ejemplos** (desactivado por defecto desde la v0.9, `ghostline.learning.examples`): recuerda las últimas
+  200 sugerencias por lenguaje que aceptas y que siguen en el archivo 10 minutos después, y envía hasta 2
+  parecidas a lo que estás escribiendo. Medido en uso real, hacía que el modelo copiara la forma del ejemplo
+  en vez de la declaración que tenía delante ([`docs/acierto.md`](docs/acierto.md)).
 - **Perfil de estilo**: *ghostline: Aprender estilo del proyecto* envía el principio de hasta 5 archivos que tú
   confirmas y guarda una guía de ~200 tokens que puedes editar. Se añade a las peticiones en archivos nuevos o
   cortos, donde no hay código del que deducir el estilo.
 - **Disparo adaptativo**: si en un contexto (por ejemplo, TypeScript tras un punto) aceptas menos del 10 % de
   las últimas 40 sugerencias, deja de sugerir ahí 24 h y te avisa. El modo manual sigue. «En mitad de línea»
   es un contexto propio: si ahí no te sirve, se silencia solo.
-- **Aviso de velocidad**: si la latencia mediana del día supera 1,5 s, propone el modo manual o reducir el contexto.
+- **Aviso de velocidad**: solo con `reasoning: minimal`, que es el modo en el que se pide rapidez. Si la
+  latencia mediana del día supera 1,5 s, propone el modo manual o reducir el contexto. Con `adaptive` el
+  modelo se para a razonar a propósito y no se avisa.
 
-*ghostline: Borrar lo aprendido en este proyecto* lo elimina todo.
+*ghostline: Borrar lo aprendido en este proyecto* lo elimina todo, también las últimas sugerencias guardadas.
 
 ## Ajustes
 
@@ -111,7 +118,7 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 | `ghostline.enabled` | `true` | |
 | `ghostline.cliPath` | `""` | Vacío: busca `claude` en `PATH`. |
 | `ghostline.model` | `"haiku"` | `sonnet` acierta algo más (15 frente a 13 de 24) y cuesta ~15 veces más. |
-| `ghostline.effort` | `"low"` | |
+| `ghostline.effort` | `"medium"` | Con `low` Haiku respeta peor las declaraciones (7 frente a 14 aciertos de 16); `high` no mejora. |
 | `ghostline.reasoning` | `"adaptive"` | El modelo decide cuándo razonar: ~52 % de líneas idénticas frente a ~32 % con `minimal`, que es más rápido. |
 | `ghostline.triggerMode` | `"auto"` | `auto` \| `manual` |
 | `ghostline.debounceMs` | `600` | Pausa al teclear para que se pida una sugerencia. |
@@ -130,7 +137,7 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
 | `ghostline.context.prefixLines` | `60` | |
 | `ghostline.context.suffixLines` | `20` | |
 | `ghostline.context.symbols` | `true` | Declaración de hasta 3 símbolos (firma, o los campos de un struct o interfaz del proyecto), vía servidor de lenguaje. `false`: solo se envía el archivo actual. |
-| `ghostline.learning.examples` | `true` | Guardar y enviar ejemplos de lo aceptado. |
+| `ghostline.learning.examples` | `false` | Guardar y enviar ejemplos de lo aceptado (solo lo que sigue en el archivo 10 minutos después). |
 | `ghostline.learning.adaptiveTrigger` | `true` | Silenciar 24 h los contextos donde casi nunca aceptas. |
 | `ghostline.debug.logPrompts` | `false` | |
 
@@ -143,6 +150,9 @@ No se entrena ningún modelo: ghostline se adapta con datos guardados solo en es
   proyecto, sus campos (nombres y tipos, nunca valores). Con ella el modelo deja de inventarse los argumentos
   de una llamada y los campos de un struct ([`docs/fase-3.md`](docs/fase-3.md)). Lo lee ghostline con el
   servidor de lenguaje, no el modelo.
+- **Lo que queda en este equipo** (en el almacenamiento del área de trabajo de VS Code, nunca fuera): las
+  últimas 40 respuestas con la línea del cursor, para poder revisarlas, y, si los activas, los ejemplos
+  aceptados.
 - **Archivos excluidos**: nunca se sugiere en ellos (tampoco en manual), nunca se envían y nunca se guarda nada de ellos.
   Por defecto: `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `*secret*`,
   `*credential*` (archivos y carpetas), `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `.aws/**`, `.ssh/**`,

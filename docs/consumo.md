@@ -72,6 +72,19 @@ ghostline sería unas 4 veces la mostrada.
 Para situarse: una sugerencia cuesta unos 0,00025 $, así que un punto de la sesión son unas 3.200 sugerencias
 y el tope de 1.500 al día, hecho entero en una sola sesión, ronda el 0,5 %.
 
+## Lo que la CLI añade por su cuenta
+
+Preguntándole al modelo, con los mismos argumentos que usa ghostline, qué más ve además del prompt (12-nov-2026,
+Claude Code 2.1.322):
+
+- un recordatorio con **el email de la cuenta** («The user's email address is…»), unas 110 tokens en cada
+  petición. Va a Anthropic, que ya lo conoce, pero se paga en todas. No he encontrado todavía cómo quitarlo;
+- **el nombre de la carpeta de trabajo**: no lo cita cuando se le pregunta, pero aparece en respuestas
+  confusas (`= ghostline-cwd-rEdDDs`). De ahí salió la sugerencia `= ghostline Model`.
+
+En la sesión del 12-nov (115 peticiones) **55 se cancelaron**, la mayoría después de que el modelo empezara a
+responder: pausas de más de 600 ms seguidas de más tecleo. Subir `ghostline.debounceMs` a 800–900 las reduce.
+
 ## Si quieres gastar aún menos
 
 - **Modo manual**: `ghostline.triggerMode: "manual"` y `Alt+\`. Solo se pide cuando tú lo dices; ninguna

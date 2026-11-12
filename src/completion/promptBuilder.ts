@@ -60,6 +60,11 @@ export interface BuiltPrompt {
   /** The windows actually sent, needed again to post-process the answer. */
   prefix: string;
   suffix: string;
+  /**
+   * Set when the cursor is in the middle of a line: the prompt then asks for that whole line, and
+   * the answer must be turned into an insertion with `insertionFromLine`.
+   */
+  line?: CursorLine;
   styleUsed: boolean;
   examplesUsed: number;
   symbolsUsed: number;
@@ -137,11 +142,40 @@ function hintBlocks(blocks: Blocks): string[] {
   return parts;
 }
 
+/** Only whitespace or closing characters: the cursor is, for practical purposes, at the end of its line. */
+const ONLY_CLOSERS = /^[\s)\]}"'`;,]*$/;
+/** A cursor line longer than this on either side is not repeated: it would cost more than it helps. */
+const MAX_LINE_SIDE_CHARS = 300;
+
+/** The cursor's line, split at the cursor, when the request is for an insertion in the middle of it. */
+export interface CursorLine {
+  /** Without the indentation. */
+  before: string;
+  after: string;
+}
+
+/**
+ * With code after the cursor on its own line the model has to work out an insertion, not a
+ * continuation, and asked for the bare insertion it mostly answered with something unrelated. Asked
+ * for the whole line as it should read it gets it right (measured: docs/acierto.md), so the line is
+ * shown again on its own with the cursor marked, and the insertion is derived from the answer.
+ */
+export function cursorLine(prefix: string, suffix: string): CursorLine | undefined {
+  const newline = suffix.indexOf('\n');
+  const after = newline < 0 ? suffix : suffix.slice(0, newline);
+  const before = prefix.slice(prefix.lastIndexOf('\n') + 1).trimStart();
+  if (ONLY_CLOSERS.test(after) || before === '') return undefined;
+  if (before.length > MAX_LINE_SIDE_CHARS || after.length > MAX_LINE_SIDE_CHARS) return undefined;
+  return { before, after };
+}
+
 function render(input: PromptInput, prefix: string, suffix: string, blocks: Blocks): string {
+  const line = cursorLine(prefix, suffix);
   return [
     ...hintBlocks(blocks),
     `<file path="${attribute(input.path)}" language="${attribute(input.languageId)}">\n` +
-      `<prefix>${prefix}</prefix><cursor/><suffix>${suffix}</suffix>\n</file>`,
+      `<prefix>${prefix}</prefix><cursor/><suffix>${suffix}</suffix>\n</file>` +
+      (line ? `\n<line>${line.before}▮${line.after}</line>` : ''),
   ].join('\n');
 }
 
@@ -219,6 +253,7 @@ export function buildPrompt(input: PromptInput): BuiltPrompt {
     estimatedTokens: tokens(text.length),
     prefix,
     suffix,
+    line: cursorLine(prefix, suffix),
     styleUsed: blocks.style !== undefined,
     examplesUsed: blocks.examples.length,
     symbolsUsed: blocks.symbols.length,

@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) generado por Claude a través de la CLI de Claude Code, con la suscripción y sin API key.",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "icon": "resources/icon.png",
   "private": true,
   "publisher": "cristianemek",
@@ -77,6 +77,11 @@
         "command": "ghostline.clearLearning",
         "title": "Borrar lo aprendido en este proyecto",
         "category": "ghostline"
+      },
+      {
+        "command": "ghostline.showRecent",
+        "title": "Ver las últimas sugerencias",
+        "category": "ghostline"
       }
     ],
     "configuration": {
@@ -108,8 +113,8 @@
             "xhigh",
             "max"
           ],
-          "default": "low",
-          "description": "Nivel de esfuerzo que se pasa a la CLI con --effort.",
+          "default": "medium",
+          "description": "Nivel de esfuerzo que se pasa a la CLI con --effort. «medium» desde la v0.9: en llamadas reales Haiku pasó de 7 a 14 aciertos de 16 respecto a «low», por un ~12 % más de coste por petición; «high» no mejoró y tarda más.",
           "scope": "application"
         },
         "ghostline.reasoning": {
@@ -303,8 +308,8 @@
         },
         "ghostline.learning.examples": {
           "type": "boolean",
-          "default": true,
-          "description": "Guarda en local (solo en este equipo) las sugerencias que aceptas y envía hasta 2 parecidas como ejemplo en cada petición (~300 tokens como máximo).",
+          "default": false,
+          "description": "Guarda en local (solo en este equipo) las sugerencias que aceptas y siguen en el archivo 10 minutos después, y envía hasta 2 parecidas como ejemplo en cada petición (~300 tokens como máximo). Desactivado por defecto desde la v0.9: medido sobre llamadas reales, el modelo copiaba la forma del ejemplo en vez de la declaración que tenía delante, y son ~240 tokens más por petición.",
           "scope": "application"
         },
         "ghostline.learning.adaptiveTrigger": {

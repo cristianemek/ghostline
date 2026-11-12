@@ -22,6 +22,7 @@ import { AdaptiveTrigger, type ContextReport } from './learning/adaptiveTrigger'
 import { ExampleStore } from './learning/exampleStore';
 import { CONTEXT_LABELS, Learning } from './learning/learning';
 import { StyleManager, type Launcher } from './learning/styleManager';
+import { RecentSuggestions, formatRecent, type RecentEntry } from './usage/recent';
 import { SLOW_P50_MS, dayRow, sessionStart, statusText, tooltipLines, usesApiKey, type SessionInfo } from './usage/report';
 import { TokenEstimator } from './usage/tokenEstimator';
 import { UsageTracker, type DayStats } from './usage/usageTracker';
@@ -42,6 +43,9 @@ export interface GhostlineTestApi {
   statusText(): string;
   logLines(): string[];
   exampleCount(): number;
+  /** Decides now about the accepted suggestions still waiting to become examples. */
+  confirmExamples(): void;
+  recent(): RecentEntry[];
   adaptiveReport(): ContextReport[];
   refreshCount(): number;
   config(): GhostlineConfig;
@@ -58,6 +62,8 @@ class Ghostline implements vscode.Disposable {
   private readonly examples: ExampleStore;
   private readonly adaptive: AdaptiveTrigger;
   private readonly style: StyleManager;
+  private readonly recent: RecentSuggestions;
+  private readonly learning: Learning;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly excludedCache = new Map<string, boolean>();
   private readonly warnedKeySources = new Set<string>();
@@ -81,6 +87,7 @@ class Ghostline implements vscode.Disposable {
     this.cwd = fs.mkdtempSync(path.join(os.tmpdir(), CWD_PREFIX));
     // Phase 2: everything ghostline learns stays in the editor's local storage.
     this.examples = new ExampleStore(context.workspaceState);
+    this.recent = new RecentSuggestions(context.workspaceState);
     this.adaptive = new AdaptiveTrigger(context.globalState);
     this.style = new StyleManager({
       context,
@@ -92,12 +99,13 @@ class Ghostline implements vscode.Disposable {
       log: (line) => this.log(line),
       onChange: () => this.queueRender(),
     });
-    const learning = new Learning({
+    this.learning = new Learning({
       examples: this.examples,
       adaptive: this.adaptive,
       styleProfile: () => this.style.profile,
       settings: () => this.config,
       charsPerToken: () => this.estimator.charsPerToken,
+      readDocument: (documentKey) => vscode.workspace.textDocuments.find((document) => document.uri.toString() === documentKey)?.getText(),
       onMuted: (languageId, triggerContext) => {
         const where = `${languageId} ${CONTEXT_LABELS[triggerContext]}`;
         this.log(`disparo adaptativo: casi nunca aceptas sugerencias en ${where}; silenciado 24 h (el modo manual sigue)`);
@@ -124,8 +132,9 @@ class Ghostline implements vscode.Disposable {
         if (vscode.window.activeTextEditor?.document.uri.toString() !== documentKey) return;
         void vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
       },
-      learning,
-      // Phase 3, off unless "ghostline.context.symbols" is on.
+      learning: this.learning,
+      journal: this.recent,
+      // Phase 3, unless "ghostline.context.symbols" is off.
       symbols: createSymbolProvider({
         isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns),
         charsPerToken: () => this.estimator.charsPerToken,
@@ -150,6 +159,7 @@ class Ghostline implements vscode.Disposable {
       vscode.commands.registerCommand('ghostline.learnProjectStyle', () => this.style.learn()),
       vscode.commands.registerCommand('ghostline.editProjectStyle', () => this.style.edit()),
       vscode.commands.registerCommand('ghostline.clearLearning', () => this.clearLearning()),
+      vscode.commands.registerCommand('ghostline.showRecent', () => this.showRecent()),
       vscode.workspace.onDidSaveTextDocument((document) => this.style.onSaved(document)),
       vscode.workspace.onDidChangeConfiguration((event) => this.onConfigChange(event)),
       vscode.workspace.onDidChangeTextDocument((event) => this.onDocumentChange(event)),
@@ -287,6 +297,8 @@ class Ghostline implements vscode.Disposable {
       },
       logLines: () => [...this.logLines],
       exampleCount: () => this.examples.count(),
+      confirmExamples: () => this.learning.confirmPending(),
+      recent: () => this.recent.list(),
       adaptiveReport: () => this.adaptive.report(),
       refreshCount: () => this.refreshes,
       config: () => this.config,
@@ -448,13 +460,23 @@ class Ghostline implements vscode.Disposable {
     );
     if (choice !== 'Borrar') return;
     this.examples.clear();
+    this.recent.clear();
     this.adaptive.clear();
     await this.style.clear();
     this.render();
   }
 
+  /** The last answers in this workspace, to look back at how the suggestions are doing. */
+  private async showRecent(): Promise<void> {
+    const document = await vscode.workspace.openTextDocument({ content: formatRecent(this.recent.list()), language: 'plaintext' });
+    await vscode.window.showTextDocument(document, { preview: true });
+  }
+
   /** Spec §8e: when the median latency is above 1.5 s, say so once a day and offer the two ways out. */
   private maybeWarnSlow(): void {
+    // Only where speed is what was asked for. With `reasoning: adaptive` the model stops to think
+    // on purpose (2–3 s), and the remedies this offers would not change that.
+    if (this.config.reasoning !== 'minimal') return;
     const day = this.usage.today();
     if (day.latencies.length < MIN_REQUESTS_FOR_SPEED_WARNING) return;
     const { p50 } = this.usage.latency(day);
@@ -495,6 +517,7 @@ class Ghostline implements vscode.Disposable {
       },
       { label: '$(output) Abrir el log', run: () => this.channel.show(true) },
       { label: '$(graph) Consumo de los últimos 7 días', run: () => this.showUsage() },
+      { label: '$(history) Últimas sugerencias', description: 'qué se ofreció y qué pasó con ello', run: () => this.showRecent() },
       { label: '$(trash) Reiniciar contadores', run: () => this.resetCounters() },
       {
         label: '$(mortar-board) Aprender estilo del proyecto',

@@ -49,7 +49,7 @@ async function run() {
     // .vscode/settings.json of this workspace sets hostile values for all of these (see run.js).
     const config = api.config();
     assert.equal(config.model, 'haiku');
-    assert.equal(config.effort, 'low');
+    assert.equal(config.effort, 'medium');
     assert.equal(config.dailyRequestLimit, 1500);
     assert.equal(config.logPrompts, false);
     assert.equal(config.symbolContext, false);
@@ -254,14 +254,49 @@ async function run() {
     return lines[lines.length - 1] ?? '';
   };
 
-  await step('ejemplos: lo aceptado se guarda en local y se envía como ejemplo en código parecido', async () => {
+  await step('diario: las últimas respuestas quedan en local con lo ofrecido, lo que dijo el modelo y su desenlace', async () => {
+    const recent = api.recent();
+    assert.ok(recent.length >= 5, `solo ${recent.length} entradas`);
+    const accepted = recent.find((entry) => entry.outcome === 'aceptada');
+    assert.ok(accepted, 'ninguna entrada aceptada');
+    assert.equal(accepted.shown, 'a + b;');
+    assert.ok(accepted.raw.includes('a + b;'));
+    assert.ok(accepted.before.length > 0 && accepted.file.startsWith('src/'));
+    assert.ok(recent.some((entry) => entry.context === 'mid-line'), 'falta la petición en mitad de línea');
+    assert.ok(!JSON.stringify(recent).includes('E2E_FAKE_TOKEN'), 'contenido de un archivo excluido en el diario');
+  });
+
+  await step('ejemplos (opcional): lo aceptado solo se guarda si sigue en el archivo, y entonces se envía en código parecido', async () => {
     await setting('debug.logPrompts', true);
     const orders = await open('src/orders.ts');
     const before = api.exampleCount();
+    const accept = (items) => vscode.commands.executeCommand('ghostline._accepted', items[0].command.arguments[0]);
+    // Off by default: accepting stores nothing.
+    const off = await ask(orders, 2, endOf(orders, 2));
+    assert.equal(off?.length, 1);
+    await accept(off);
+    api.confirmExamples();
+    assert.equal(api.exampleCount(), before);
+
+    await setting('learning.examples', true);
+    // Accepted, but the text is not in the file when it is checked (fixed or deleted): no example.
+    api.provider.clearCache();
+    const fixed = await ask(orders, 2, endOf(orders, 2));
+    assert.equal(fixed?.length, 1);
+    await accept(fixed);
+    api.confirmExamples();
+    assert.equal(api.exampleCount(), before);
+    // Accepted and still there: an example, but only once it has been checked.
+    api.provider.clearCache();
     const first = await ask(orders, 2, endOf(orders, 2));
     assert.equal(first?.length, 1);
     assert.ok(!lastPrompt().includes('<examples>'), 'no debería haber ejemplos todavía');
-    await vscode.commands.executeCommand('ghostline._accepted', first[0].command.arguments[0]);
+    const edit = new vscode.WorkspaceEdit();
+    edit.insert(orders.uri, new vscode.Position(2, endOf(orders, 2)), first[0].insertText);
+    await vscode.workspace.applyEdit(edit);
+    await accept(first);
+    assert.equal(api.exampleCount(), before);
+    api.confirmExamples();
     assert.equal(api.exampleCount(), before + 1);
 
     const second = await ask(orders, 7, endOf(orders, 7));
@@ -272,6 +307,7 @@ async function run() {
     assert.ok(prompt.includes('orderService.list(filters);'), 'falta el contexto del ejemplo');
     // The examples come before the file, as the spec orders the blocks.
     assert.ok(prompt.indexOf('<examples>') < prompt.indexOf('<file path='));
+    await setting('learning.examples', false);
   });
 
   await step('perfil de estilo: se genera con la CLI, se guarda y va primero en cada prompt', async () => {

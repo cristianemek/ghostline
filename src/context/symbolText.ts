@@ -39,6 +39,34 @@ export function pickIdentifiers(linePrefix: string, max: number = MAX_SYMBOLS): 
 }
 
 /**
+ * The first identifiers after the cursor on its line, nearest first: what an insertion in front of
+ * existing code is about ("messages▮ c.queries.ListContextMessages(…)" needs to know what that call
+ * returns). Columns are relative to the start of `restOfLine`.
+ */
+export function pickIdentifiersAfter(restOfLine: string, max: number = MAX_SYMBOLS): IdentifierUse[] {
+  // A trailing comment is prose.
+  const code = restOfLine.split(/\/\/|#(?!\w)/)[0] ?? '';
+  const meaningful = identifiers(code);
+  const picked: IdentifierUse[] = [];
+  const seen = new Set<string>();
+  for (const match of code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
+    if (picked.length >= max) break;
+    const name = match[0];
+    if (name.length < MIN_IDENTIFIER_LENGTH || !meaningful.has(name.toLowerCase()) || seen.has(name)) continue;
+    if ((code.slice(0, match.index).match(/["'`]/g)?.length ?? 0) % 2 === 1) continue;
+    seen.add(name);
+    picked.push({ name, character: match.index ?? 0 });
+  }
+  return picked;
+}
+
+/** A declaration as it goes into the prompt, with the identifier it was looked up for. */
+export interface SymbolLine {
+  name: string;
+  line: string;
+}
+
+/**
  * The bracket the cursor is inside of when it was opened on an earlier line: the call or the literal
  * being filled in ("…CreateParams{" three lines up). `above` holds the lines before the cursor's line,
  * nearest last. Undefined when it was opened on the cursor's own line (its identifiers are picked

@@ -1,5 +1,14 @@
 import * as vscode from 'vscode';
-import { MAX_SYMBOLS, enclosingOpener, extractSignature, formatSymbols, pickIdentifiers, type ResolvedSymbol } from './symbolText';
+import {
+  MAX_SYMBOLS,
+  enclosingOpener,
+  extractSignature,
+  formatSymbols,
+  pickIdentifiers,
+  pickIdentifiersAfter,
+  type ResolvedSymbol,
+  type SymbolLine,
+} from './symbolText';
 
 export interface SymbolDeps {
   /** True for paths that must never be read as context. */
@@ -70,9 +79,18 @@ export function createSymbolProvider(deps: SymbolDeps) {
     return value;
   }
 
-  return async (document: vscode.TextDocument, position: vscode.Position, signal: AbortSignal): Promise<string[]> => {
-    const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
+  return async (document: vscode.TextDocument, position: vscode.Position, signal: AbortSignal): Promise<SymbolLine[]> => {
+    const lineText = document.lineAt(position.line).text;
+    const linePrefix = lineText.slice(0, position.character);
     const wanted = pickIdentifiers(linePrefix).map((use) => ({ name: use.name, at: new vscode.Position(position.line, use.character) }));
+    // Code after the cursor on the same line: an insertion in front of a call is about that call
+    // ("messages▮ c.queries.ListContextMessages(…)": what does it return?).
+    for (const use of pickIdentifiersAfter(lineText.slice(position.character))) {
+      if (wanted.length >= MAX_SYMBOLS) break;
+      if (!wanted.some((known) => known.name === use.name)) {
+        wanted.push({ name: use.name, at: new vscode.Position(position.line, position.character + use.character) });
+      }
+    }
     if (wanted.length < MAX_SYMBOLS) {
       // Inside a call or a literal opened further up ("…CreateParams{" and the cursor on a field
       // line): what is being filled in is named on that line, not on this one.
@@ -99,9 +117,12 @@ export function createSymbolProvider(deps: SymbolDeps) {
     });
     const resolved = await Promise.race([lookups, timeout]);
     if (!resolved) return [];
-    return formatSymbols(
-      resolved.filter((symbol): symbol is ResolvedSymbol => symbol !== null),
+    const found = resolved.flatMap((symbol, index) => (symbol ? [{ symbol, name: wanted[index]?.name ?? '' }] : []));
+    const lines = formatSymbols(
+      found.map((entry) => entry.symbol),
       deps.charsPerToken(),
     );
+    const lineOf = (symbol: ResolvedSymbol): string => `${symbol.signature.trim()}  // ${symbol.path}`;
+    return lines.map((line) => ({ line, name: found.find((entry) => lineOf(entry.symbol) === line)?.name ?? '' }));
   };
 }

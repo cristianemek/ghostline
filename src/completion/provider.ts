@@ -3,6 +3,8 @@ import * as vscode from 'vscode';
 import { totalInputTokens } from '../cli/streamParser';
 import type { CompletionOutcome, WorkerPool } from '../cli/workerPool';
 import type { GhostlineConfig } from '../config';
+import type { SymbolLine } from '../context/symbolText';
+import type { RecentEntry } from '../usage/recent';
 import type { TokenEstimator } from '../usage/tokenEstimator';
 import { summaryLine } from '../usage/report';
 import { formatRequestLine, type RequestLogEntry } from '../usage/requestLog';
@@ -10,7 +12,7 @@ import type { UsageTracker } from '../usage/usageTracker';
 import { FailureBreaker } from './breaker';
 import { LruCache, Typeahead, completionKey, type DocumentReader } from './cache';
 import type { LearningHooks, SuggestionInfo } from './hooks';
-import { postprocess, shouldStopEarly, trimAgainstSuffix, type IndentStyle } from './postprocess';
+import { insertionFromLine, insertionSoFar, postprocess, shouldStopEarly, trimAgainstSuffix, type IndentStyle } from './postprocess';
 import { DEFAULT_LIMITS, buildPrompt } from './promptBuilder';
 import {
   TypingRate,
@@ -46,12 +48,18 @@ const SENT_TO_API_MS = 150;
 /** How long a programmatic refresh may take to reach the provider. */
 const REFRESH_WINDOW_MS = 1000;
 
-/** Phase 3: signature lines for symbols on the current line. */
+/** Phase 3: declarations of symbols used at the cursor. */
 export type SymbolProvider = (
   document: vscode.TextDocument,
   position: vscode.Position,
   signal: AbortSignal,
-) => Promise<string[]>;
+) => Promise<SymbolLine[]>;
+
+/** Where answered requests are kept for looking back at them (see usage/recent.ts). */
+export interface SuggestionJournal {
+  add(entry: RecentEntry): void;
+  resolve(id: number, outcome: string): void;
+}
 
 export interface ProviderDeps {
   getConfig(): GhostlineConfig;
@@ -73,6 +81,7 @@ export interface ProviderDeps {
   refresh?(documentKey: string): void;
   learning?: LearningHooks;
   symbols?: SymbolProvider;
+  journal?: SuggestionJournal;
 }
 
 interface LiveSuggestion extends SuggestionInfo {
@@ -106,6 +115,11 @@ interface Flight {
   anchor: number;
   tail: string;
   lineWasBlank: boolean;
+  /**
+   * Set for a request in the middle of a line: the answer is that whole line, and this is what was
+   * before the cursor on it (see `insertionFromLine`).
+   */
+  lineBefore: string | undefined;
   /** Raw answer streamed so far. */
   partial: string;
   /** Called after every piece of the answer arrives. */
@@ -398,9 +412,9 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     const waiter = new AbortController();
     const subscription = token.onCancellationRequested(() => waiter.abort());
     if (token.isCancellationRequested) waiter.abort();
-    let symbols: string[];
+    let symbols: SymbolLine[];
     try {
-      let symbolsPending: Promise<string[]> = Promise.resolve([]);
+      let symbolsPending: Promise<SymbolLine[]> = Promise.resolve([]);
       const lookUpSymbols = (): void => {
         if (config.symbolContext && deps.symbols) symbolsPending = deps.symbols(document, position, waiter.signal).catch(() => []);
       };
@@ -432,7 +446,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       suffix,
       styleProfile: extras.styleProfile,
       examples: config.learningExamples ? extras.examples : undefined,
-      symbols,
+      symbols: symbols.map((symbol) => symbol.line),
       limits: {
         ...DEFAULT_LIMITS,
         prefixLines: config.prefixLines,
@@ -453,6 +467,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       anchor: offset,
       tail: read(Math.max(0, offset - TAIL_CHARS), offset),
       lineWasBlank: linePrefix.trim() === '',
+      lineBefore: built.line?.before,
       partial: '',
       onPartial: new Set(),
       controller: new AbortController(),
@@ -477,7 +492,10 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       logEntry.hints = [
         ...(built.styleUsed ? ['estilo'] : []),
         ...(built.examplesUsed > 0 ? [`${built.examplesUsed} ej.`] : []),
-        ...(built.symbolsUsed > 0 ? [`${built.symbolsUsed} símbolos`] : []),
+        // By name: "2 símbolos" did not say whether the one that mattered was among them.
+        ...(built.symbolsUsed > 0
+          ? [`símbolos: ${symbols.slice(0, built.symbolsUsed).map((symbol) => symbol.name).join(', ')}`]
+          : []),
       ];
       if (config.logPrompts) {
         deps.log(`#${id} prompt (${built.chars} caracteres, ~${built.estimatedTokens} tokens):\n${built.text}`);
@@ -496,7 +514,9 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       this.breaker.success();
 
       let text = postprocess({
-        raw: outcome.text,
+        // In the middle of a line the model was asked for the whole line: what it adds at the
+        // cursor is the completion, and an answer that changes either side of it is not one.
+        raw: built.line ? insertionFromLine(outcome.text, built.line.before, built.line.after) : outcome.text,
         prefix: built.prefix,
         suffix: built.suffix,
         maxLines: config.maxLines,
@@ -509,6 +529,23 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
         text = text.split('\n')[0] ?? '';
         if (!text.trim()) text = '';
       }
+      deps.journal?.add({
+        id,
+        at: Date.now(),
+        file: promptPath(document),
+        languageId,
+        context: triggerContext,
+        manual,
+        before: linePrefix,
+        after: restOfLine,
+        raw: outcome.text,
+        shown: text,
+        hints: logEntry.hints ?? [],
+        outcome: text ? 'sin resolver' : 'vacía',
+        inputTokens: totalInputTokens(outcome.usage),
+        thinkingTokens: outcome.usage.thinkingTokens,
+        totalMs: outcome.totalMs,
+      });
       this.cache.set(key, text);
       if (!text) {
         deps.log(formatRequestLine(logEntry, 'vacía'));
@@ -555,7 +592,11 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
   private flightStillFits(flight: Flight, place: Place): boolean {
     if (flight.documentKey !== place.documentKey || place.offset < flight.anchor) return false;
     if (place.read(Math.max(0, flight.anchor - TAIL_CHARS), flight.anchor) !== flight.tail) return false;
-    return agreesWithTyping(flight.partial, place.read(flight.anchor, place.offset), flight.lineWasBlank);
+    // What the answer would insert so far: the answer itself, or, when it is a whole line, the part
+    // of it that comes after what was already before the cursor.
+    const inserting = flight.lineBefore === undefined ? flight.partial : insertionSoFar(flight.partial, flight.lineBefore);
+    if (inserting === null) return false;
+    return agreesWithTyping(inserting, place.read(flight.anchor, place.offset), flight.lineWasBlank);
   }
 
   /** Waits for a flight on behalf of one provider call. The call can be cancelled; the flight cannot (by it). */
@@ -609,6 +650,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     if (!arrival) return;
     this.arrived = null;
     if (arrival.logEntry) this.deps.log(formatRequestLine(arrival.logEntry, 'llegó tarde y no se usó'));
+    this.deps.journal?.resolve(arrival.suggestion.id, 'llegó tarde y no se usó');
   }
 
   /**
@@ -628,8 +670,10 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       : '';
     if (!rest.trim()) {
       if (arrival.logEntry) deps.log(formatRequestLine(arrival.logEntry, 'llegó tarde y no se usó'));
+      deps.journal?.resolve(suggestion.id, 'llegó tarde y no se usó');
       return undefined;
     }
+    deps.journal?.resolve(suggestion.id, 'mostrada');
     this.live = {
       ...suggestion,
       documentVersion: place.document.version,
@@ -674,7 +718,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
     if (outcome.status === 'ok') {
       const day = deps.usage.today();
       if (day.latencies.length % SUMMARY_EVERY === 0) {
-        deps.log(summaryLine(day, deps.usage.latency(day), deps.usage.medianInputTokens(day)));
+        deps.log(summaryLine(day, deps.usage.latency(day), deps.usage.medianInputTokens(day), deps.getConfig().reasoning === 'minimal'));
       }
     }
     deps.onActivity();
@@ -721,6 +765,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       else deps.learning?.onIgnored(live);
     }
     if (live.logEntry) deps.log(formatRequestLine(live.logEntry, `${live.text.split('\n').length} líneas → ${label}`));
+    deps.journal?.resolve(live.id, label);
     deps.onActivity();
   }
 }

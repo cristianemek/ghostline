@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   hasUnmatchedCloser,
+  insertionFromLine,
+  insertionSoFar,
   postprocess,
   shouldStopEarly,
   stripCodeFences,
@@ -133,18 +135,24 @@ test('real model outputs from the benchmark that used to slip through', () => {
   );
 });
 
-test('the model second-guessing itself mid-answer is cut where it starts (seen in the typing simulation)', () => {
-  assert.equal(
-    run("status === 'success') day.errors++... wait — the completion should be something else entirely", '    } else if (record.'),
-    "status === 'success') day.errors++",
-  );
-  assert.equal(
-    run("status === 'success' ... wait—the chain ends with `else if (record.status` so this is wrong", '    } else if (record.'),
-    "status === 'success'",
-  );
-  assert.equal(run('return total;\nNo, the function returns void here', '  '), 'return total;');
-  // Nothing but second thoughts: nothing to show.
+test('an answer in which the model second-guesses itself is not offered at all', () => {
+  // Seen in the typing simulation…
+  assert.equal(run("status === 'success') day.errors++... wait — the completion should be something else entirely", '    } else if (record.'), '');
+  assert.equal(run("status === 'success' ... wait—the chain ends with `else if (record.status` so this is wrong", '    } else if (record.'), '');
+  assert.equal(run('return total;\nNo, the function returns void here', '  '), '');
   assert.equal(run('wait — the cursor is inside a string', '  '), '');
+  // …and in real use (Go): the part before the doubt is a draft the model is taking back.
+  assert.equal(run('status := ... no; the function ends after the status/content normalization.', '\t', '\n}', { indent: TABS }), '');
+  assert.equal(run('"log slog.Error"? No —', '\tslog.Error(', ')', { indent: TABS }), '');
+  assert.equal(run('return items... actually the loop above already returns', '  '), '');
+  assert.equal(run('total += price ... then again the cart is empty here', '  '), '');
+  // A question mark or the word "no" in ordinary code is not a doubt.
+  assert.equal(run('ok ? no : yes', 'const answer = '), 'ok ? no : yes');
+  assert.equal(run('if (count === 0) return "no - none";', '  '), 'if (count === 0) return "no - none";');
+  // Variadic and spread syntax, and an ellipsis inside a string, are code.
+  assert.equal(run('append(items, more...)', '\titems = ', '', { indent: TABS }), 'append(items, more...)');
+  assert.equal(run('[...first, ...second]', 'const all = '), '[...first, ...second]');
+  assert.equal(run('log("loading ... please wait a bit")', '  '), 'log("loading ... please wait a bit")');
   // Real code and comments that merely contain the word are untouched.
   assert.equal(run('await waitFor(ready);', '  '), 'await waitFor(ready);');
   assert.equal(run('wait - 1', 'const remaining = '), 'wait - 1');
@@ -217,6 +225,78 @@ test('suffix overlap: same line', () => {
   // A balanced call keeps its own closing paren.
   assert.equal(run('bar(a)', 'foo(', ')'), 'bar(a)');
   assert.equal(run('items[0]', 'use(', ')'), 'items[0]');
+});
+
+test('a block wrapped in single backticks is markdown, not code (accepted like that in real use)', () => {
+  const raw = '`if err != nil {\n\t\treturn pgtype.UUID{}, nil, fmt.Errorf("list context messages: %w", err)\n\t}\n`';
+  assert.equal(
+    run(raw, 'messages, err := c.queries.ListContextMessages(ctx, conversationID)\n\n\t', '\n\n\treturn pgtype.UUID{}, nil, nil\n}', { indent: TABS }),
+    'if err != nil {\n\t\treturn pgtype.UUID{}, nil, fmt.Errorf("list context messages: %w", err)\n\t}',
+  );
+  // Where a value is expected it may be a real multi-line raw string or template literal.
+  assert.equal(run('`SELECT id\nFROM users`', 'const query = ', ''), '`SELECT id\nFROM users`');
+  assert.equal(run('`line one\nline two`', '\tsql := ', '', { indent: TABS }), '`line one\n\tline two`');
+});
+
+test('mid-line: the insertion is what turns the current line into the whole line the model wrote', () => {
+  const call = 'c.queries.ListContextMessages(ctx, conversationID)';
+  // The two cases from real use.
+  assert.equal(insertionFromLine(`messages, err := ${call}`, '\tmessages', ` ${call}`), ', err :=');
+  assert.equal(
+    insertionFromLine('conversation, err := c.queries.CreateConversation(ctx, gen.CreateConversationParams{', '\t\tconversation, ', 'c.queries.CreateConversation(ctx, gen.CreateConversationParams{'),
+    'err := ',
+  );
+  // Indentation, a code fence, an echoed cursor mark or lines after the first do not matter.
+  assert.equal(insertionFromLine(`\t\tmessages, err := ${call}\n\tif err != nil {`, '\tmessages', ` ${call}`), ', err :=');
+  assert.equal(insertionFromLine('```go\nmessages, err :=▮ ' + call + '\n```', '\tmessages', ` ${call}`), ', err :=');
+  // Something on either side was changed, nothing was added, or it is not the line at all: no completion.
+  assert.equal(insertionFromLine(`msgs, err := ${call}`, '\tmessages', ` ${call}`), '');
+  assert.equal(insertionFromLine('messages, err := c.queries.ListContextMessages(ctx)', '\tmessages', ` ${call}`), '');
+  assert.equal(insertionFromLine(`messages ${call}`, '\tmessages', ` ${call}`), '');
+  assert.equal(insertionFromLine('<none/>', '\tmessages', ` ${call}`), '');
+  assert.equal(insertionFromLine('', '\tmessages', ` ${call}`), '');
+
+  // While the answer is still arriving: what it would insert so far.
+  assert.equal(insertionSoFar('', '\tmessages'), '');
+  assert.equal(insertionSoFar('mess', '\tmessages'), '');
+  assert.equal(insertionSoFar('messages, e', '\tmessages'), ', e');
+  assert.equal(insertionSoFar(`messages, err := ${call}`, '\tmessages'), `, err := ${call}`);
+  // It is writing some other line: no point in waiting for it.
+  assert.equal(insertionSoFar('The line needs', '\tmessages'), null);
+});
+
+test('leftovers of the answer format are not code (seen with the real CLI)', () => {
+  const go = (raw: string, prefix: string, suffix: string): string =>
+    postprocess({ raw, prefix, suffix, maxLines: 6, indent: TABS, languageId: 'go' });
+  // A closing tag nothing opened.
+  assert.equal(go('ctx, conversationID</parameter>', '\tc.queries.ListContextMessages(', ')'), 'ctx, conversationID');
+  // The prompt's own tags: the model is echoing, there is nothing to show.
+  assert.equal(go('<prefix> cursor only </prefix>', '\tmessages', ' c.queries.ListContextMessages(ctx)'), '');
+  assert.equal(go('</suffix>', '\tx := ', ''), '');
+  // Where tags are code they stay.
+  assert.equal(postprocess({ raw: 'Hello</span>', prefix: '<span>', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'html' }), 'Hello</span>');
+  assert.equal(
+    postprocess({ raw: '<li>{item}</li>', prefix: '  return ', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'typescriptreact' }),
+    '<li>{item}</li>',
+  );
+  // A tag the completion itself opens is kept anywhere.
+  assert.equal(go('"<b>bold</b>"', '\ts := ', ''), '"<b>bold</b>"');
+});
+
+test('go: the brace of a named literal written again is dropped; in a slice or map literal it opens an element', () => {
+  const go = (raw: string, prefix: string, suffix: string): string =>
+    postprocess({ raw, prefix, suffix, maxLines: 6, indent: TABS, languageId: 'go' });
+  // Accepted like this in real use: "…Params{{ConversationID: …}".
+  assert.equal(
+    go('{ConversationID: conversationID, Role: gen.MessageRoleUser}', '\tc.queries.CreateMessage(ctx, gen.CreateMessageParams{', '})'),
+    'ConversationID: conversationID, Role: gen.MessageRoleUser',
+  );
+  assert.equal(go('{Name: "a"', '\titem := &Item{', '}'), 'Name: "a"');
+  assert.equal(go('{Name: "a"}, {Name: "b"}', '\titems := []Item{', '}'), '{Name: "a"}, {Name: "b"}');
+  assert.equal(go('{"type": "text"}', '\tparts := []map[string]string{', '}'), '{"type": "text"}');
+  assert.equal(go('{1, 2}', '\tgrid := map[string][]int{"a": ', '}'), '{1, 2}');
+  // Other languages are left alone.
+  assert.equal(run('{ a: 1 }', 'call(Foo{', '})'), '{ a: 1 }');
 });
 
 test('in front of more code on the same line the separating space is part of the completion', () => {

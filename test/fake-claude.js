@@ -86,9 +86,13 @@ async function answer(message) {
   }
 
   const prompt = typeof message?.message?.content === 'string' ? message.message.content : '';
-  const text = (process.env.FAKE_TEXT || 'fake completion')
+  const completion = (process.env.FAKE_TEXT || 'fake completion')
     .replace('{turn}', String(turn))
     .replace('{promptLength}', String(prompt.length));
+  // In the middle of a line the prompt asks for the whole line: answer it with the completion in
+  // place of the cursor mark, as a model following the instructions would.
+  const line = /<line>([^\n]*)▮([^\n]*)<\/line>\s*$/.exec(prompt);
+  const text = line ? `${line[1]}${completion}${line[2]}` : completion;
 
   await sleep(delayMs);
   if (mode === 'noisy') {

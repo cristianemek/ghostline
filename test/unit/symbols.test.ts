@@ -1,7 +1,50 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildPrompt, DEFAULT_LIMITS } from '../../src/completion/promptBuilder';
-import { enclosingOpener, extractSignature, formatSymbols, pickIdentifiers } from '../../src/context/symbolText';
+import { enclosingOpener, extractSignature, formatSymbols, pickIdentifiers, pickIdentifiersAfter } from '../../src/context/symbolText';
+
+test('identifiers after the cursor: nearest first, for an insertion in front of existing code', () => {
+  // Seen in real use: return values being named in front of a call that was already written.
+  const rest = ' c.queries.ListContextMessages(ctx, conversationID)';
+  assert.deepEqual(pickIdentifiersAfter(rest), [
+    { name: 'queries', character: rest.indexOf('queries') },
+    { name: 'ListContextMessages', character: rest.indexOf('ListContextMessages') },
+    { name: 'ctx', character: rest.indexOf('ctx') },
+  ]);
+  assert.deepEqual(
+    pickIdentifiersAfter('compute(total, "not this one", rate) // nor this', 5).map((use) => use.name),
+    ['compute', 'total', 'rate'],
+  );
+  assert.deepEqual(pickIdentifiersAfter(')'), []);
+  assert.deepEqual(pickIdentifiersAfter(''), []);
+});
+
+test('prompt: with code after the cursor on its line, the line is shown again with the cursor marked', () => {
+  const limits = { ...DEFAULT_LIMITS, targetTokens: 900, charsPerToken: 2.7 };
+  const midLine = buildPrompt({
+    path: 'api/core.go',
+    languageId: 'go',
+    prefix: 'func run() {\n\tmessages',
+    suffix: ' c.queries.ListContextMessages(ctx, conversationID)\n}\n',
+    limits,
+  });
+  assert.ok(midLine.text.endsWith('</file>\n<line>messages▮ c.queries.ListContextMessages(ctx, conversationID)</line>'), midLine.text.slice(-120));
+  // …and the caller is told, so that it turns the whole line the model answers into an insertion.
+  assert.deepEqual(midLine.line, { before: 'messages', after: ' c.queries.ListContextMessages(ctx, conversationID)' });
+  // At the end of the line, before closing characters, or on an empty line there is nothing to add.
+  for (const [prefix, suffix] of [
+    ['func run() {\n\tx := compute(', ')\n}\n'],
+    ['func run() {\n\tx := ', '\n}\n'],
+    ['func run() {\n\t', 'existing()\n}\n'],
+  ] as const) {
+    const built = buildPrompt({ path: 'a.go', languageId: 'go', prefix, suffix, limits });
+    assert.ok(!built.text.includes('<line>'), prefix);
+    assert.equal(built.line, undefined);
+  }
+  // A line too long to repeat is left to the plain insertion.
+  const long = buildPrompt({ path: 'a.go', languageId: 'go', prefix: `\tx := ${'a'.repeat(400)}, `, suffix: 'rest()\n', limits });
+  assert.equal(long.line, undefined);
+});
 
 test('type declarations bring their members: names and types, never values', () => {
   // The struct from the session that prompted this (sqlc output).

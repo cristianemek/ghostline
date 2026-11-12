@@ -143,15 +143,18 @@ export function tooltipLines(day: DayStats, session: SessionInfo): string[] {
 /** The spec's threshold: above this median latency the user is told and offered adjustments. */
 export const SLOW_P50_MS = 1500;
 
-/** Periodic line for the log with the day's latency percentiles and input size. */
-export function summaryLine(day: DayStats, latency: LatencyStats, medianInput: number | undefined): string {
+/**
+ * Periodic line for the log with the day's latency percentiles and input size. `warnSlow`: whether a
+ * slow median deserves a warning (not when the model is left to think, which is slow by choice).
+ */
+export function summaryLine(day: DayStats, latency: LatencyStats, medianInput: number | undefined, warnSlow = true): string {
   const parts = [
     `resumen de hoy: ${day.requests} peticiones`,
     `latencia p50 ${ms(latency.p50)} / p95 ${ms(latency.p95)}`,
     `entrada mediana ${medianInput === undefined ? '–' : Math.round(medianInput)} tokens`,
     `${day.shown} mostradas, ${day.accepted} aceptadas (${percent(acceptanceRate(day))})`,
   ];
-  if (latency.p50 !== undefined && latency.p50 > SLOW_P50_MS) {
+  if (warnSlow && latency.p50 !== undefined && latency.p50 > SLOW_P50_MS) {
     parts.push(
       'AVISO: la p50 supera 1,5 s; prueba el modo manual ("ghostline.triggerMode") ' +
         'o reduce el contexto ("ghostline.context.prefixLines")',
