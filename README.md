@@ -6,8 +6,7 @@ tengas configurada en ella.
 
 De momento funciona con un solo agente: la CLI de [Claude Code](https://claude.com/claude-code).
 
-> Proyecto independiente, sin relación con Anthropic ni respaldo suyo. Lee el [aviso legal](#aviso-legal)
-> antes de usarlo.
+![ghostline completando código en Go, React y Laravel](docs/demo.gif)
 
 ## Requisitos
 
@@ -92,16 +91,11 @@ El resto está en *Ajustes → ghostline → Avanzado*.
 
 El detalle, y cómo avisar de un fallo de seguridad, en `SECURITY.md`.
 
-## Aviso legal
+## Sobre el proyecto
 
-- ghostline es un proyecto independiente. No está afiliado a Anthropic ni a ningún otro proveedor de IA, ni
-  cuenta con su respaldo o patrocinio. «Claude» y «Claude Code» son marcas de Anthropic.
-- ghostline no da acceso a ningún servicio de IA ni lo revende: se limita a ejecutar en tu equipo, sin
-  modificarla, la herramienta que tú has instalado y autenticado.
-- Usarla a través de ghostline consume tu cuenta y queda sujeto a los términos y políticas de tu proveedor.
-  Comprobar que tu forma de usarlo los cumple, y asumir lo que cueste, es responsabilidad tuya.
-- El software se ofrece tal cual, sin garantía de ningún tipo. Su autor no responde de daños, costes ni de
-  limitaciones o cierres de cuenta derivados de su uso. Las condiciones completas están en `LICENSE`.
+ghostline es un proyecto independiente, sin relación con Anthropic («Claude» y «Claude Code» son marcas
+suyas). No da acceso a ningún servicio de IA: ejecuta en tu equipo la herramienta que tú has instalado,
+con tu cuenta, así que su uso sigue las condiciones de tu proveedor.
 
 ## Desarrollo
 
@@ -111,4 +105,4 @@ npm run test:e2e   # VS Code real en un perfil aislado, con la CLI simulada
 npm run package    # genera el .vsix
 ```
 
-Sin dependencias de runtime. Licencia MIT.
+Sin dependencias de runtime. Licencia [MIT](LICENSE).
