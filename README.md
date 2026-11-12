@@ -42,6 +42,24 @@ Si la barra de estado dice «sin CLI», pon en `ghostline.cliPath` la ruta del e
   Al pasar el ratón, el detalle; con un clic, pausar, cambiar de modo, ver el consumo, el log y las últimas
   sugerencias.
 
+## Cómo funciona por debajo
+
+1. **Cuándo pide.** Al dejar de teclear (600 ms por defecto), al final de una línea o justo donde acabas de
+   escribir. Si sigues tecleando lo mismo que el modelo está respondiendo, la petición en curso se aprovecha
+   en vez de lanzar otra.
+2. **Qué envía.** Un prompt pequeño: unos 2.000 tokens con el código alrededor del cursor y la declaración
+   de los símbolos que estás usando (se la pide al servidor de lenguaje del editor), más un índice de lo que
+   declara tu proyecto (hasta unos 5.000, que se quedan en caché entre peticiones). El índice lo construye
+   ghostline leyendo tus archivos; el modelo no lee nada por su cuenta.
+3. **Cómo lo pide.** Lanza la CLI de tu agente en modo no interactivo, un proceso por sugerencia y otro ya
+   arrancado esperando la siguiente, para no pagar el arranque. Va sin herramientas, sin servidores MCP,
+   sin comandos ni sesión guardada, y en una carpeta vacía: solo puede devolver texto.
+4. **Qué hace con la respuesta.** La limpia antes de enseñarla: quita explicaciones y marcas de formato,
+   ajusta la sangría a la de tu archivo, descarta lo que repite lo que ya hay después del cursor y no
+   muestra nada si el modelo duda.
+5. **Qué recuerda.** Solo en tu equipo: las peticiones, los tokens y el coste del día, lo aceptado y lo
+   ignorado (para dejar de sugerir donde nunca aceptas) y las últimas 40 sugerencias de cada proyecto.
+
 ## Ajustes principales
 
 | Ajuste | Por defecto | |
