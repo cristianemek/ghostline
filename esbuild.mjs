@@ -1,5 +1,3 @@
-// Build script. No flags: extension bundle (dev). --production: minified.
-// --tests: bundles test/unit/*.test.ts into out/test. --scripts: bundles scripts/*.ts into out/scripts.
 import { build, context } from 'esbuild';
 import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,7 +9,6 @@ const common = {
   bundle: true,
   platform: 'node',
   format: 'cjs',
-  // VS Code 1.144 (the minimum in package.json) runs extensions on Node 24.
   target: 'node24',
   external: ['vscode'],
   logLevel: 'info',

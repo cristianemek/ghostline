@@ -1,5 +1,3 @@
-// Anonymizes a raw `claude -p --output-format stream-json` capture so it can live in test/fixtures.
-// usage: node scripts/anonymize-fixture.mjs <raw.ndjson> <out.ndjson>
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const [input, output] = process.argv.slice(2);

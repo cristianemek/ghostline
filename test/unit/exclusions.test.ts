@@ -28,7 +28,6 @@ test('default patterns exclude the usual secret files', () => {
     '/home/me/.pypirc',
     '/home/me/.netrc',
     '/p/passwords.kdbx',
-    // Bare file names (untitled-like or relative paths).
     '.env',
     '.env.local',
   ]) {
@@ -76,7 +75,6 @@ test('glob syntax: *, **, ?, braces and character classes', () => {
   assert.equal(matches('**/*.{crt,cer}', 'x/a.cert'), false);
   assert.equal(matches('**/id_[re]*', 'x/id_rsa'), true);
   assert.equal(matches('**/id_[!r]*', 'x/id_rsa'), false);
-  // Regex metacharacters in a pattern are literal.
   assert.equal(matches('**/a+b(1).txt', 'x/a+b(1).txt'), true);
   assert.equal(matches('**/a.b', 'x/axb'), false);
 });
@@ -109,7 +107,6 @@ test('folders named after secrets and other well-known secret stores are exclude
 });
 
 test('a hostile pattern cannot freeze the matcher', () => {
-  // With the old regex-based matcher six of these took a second and ten never finished.
   const deep = 'C:/' + Array.from({ length: 28 }, (_, i) => `dir${i}`).join('/') + '/file.ts';
   const started = performance.now();
   for (const stars of [6, 10, 20, 60]) {
@@ -123,10 +120,9 @@ test('a hostile pattern cannot freeze the matcher', () => {
 
 test('patterns too complex to evaluate safely are reported, not silently trusted', () => {
   const huge = '**/' + 'x'.repeat(300);
-  const explosive = '{a,b}{c,d}{e,f}{g,h}{i,j}{k,l}{m,n}.txt'; // 128 alternatives
+  const explosive = '{a,b}{c,d}{e,f}{g,h}{i,j}{k,l}{m,n}.txt';
   assert.deepEqual(unusablePatterns(['**/.env', huge, explosive, '', '  ']), [huge, explosive]);
   assert.equal(isPathExcluded('/p/acegikm.txt', [explosive]), false);
-  // A reasonable brace pattern still works.
   assert.equal(matchesGlob('**/*.{pem,key,crt}', '/p/server.crt'), true);
   assert.equal(matchesGlob('**/{a,b{1,2}}.txt', '/p/b2.txt'), true);
   assert.equal(matchesGlob('**/{a,b{1,2}}.txt', '/p/b3.txt'), false);

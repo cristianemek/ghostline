@@ -4,7 +4,6 @@ import { buildPrompt, DEFAULT_LIMITS } from '../../src/completion/promptBuilder'
 import { enclosingOpener, extractSignature, formatSymbols, pickIdentifiers, pickIdentifiersAfter } from '../../src/context/symbolText';
 
 test('identifiers after the cursor: nearest first, for an insertion in front of existing code', () => {
-  // Return values being named in front of a call that was already written.
   const rest = ' c.queries.ListOrderItems(ctx, orderID)';
   assert.deepEqual(pickIdentifiersAfter(rest), [
     { name: 'queries', character: rest.indexOf('queries') },
@@ -29,9 +28,7 @@ test('prompt: with code after the cursor on its line, the line is shown again wi
     limits,
   });
   assert.ok(midLine.text.endsWith('</file>\n<line>items▮ c.queries.ListOrderItems(ctx, orderID)</line>'), midLine.text.slice(-120));
-  // …and the caller is told, so that it turns the whole line the model answers into an insertion.
   assert.deepEqual(midLine.line, { before: 'items', after: ' c.queries.ListOrderItems(ctx, orderID)' });
-  // At the end of the line, before closing characters, or on an empty line there is nothing to add.
   for (const [prefix, suffix] of [
     ['func run() {\n\tx := compute(', ')\n}\n'],
     ['func run() {\n\tx := ', '\n}\n'],
@@ -41,13 +38,11 @@ test('prompt: with code after the cursor on its line, the line is shown again wi
     assert.ok(!built.text.includes('<line>'), prefix);
     assert.equal(built.line, undefined);
   }
-  // A line too long to repeat is left to the plain insertion.
   const long = buildPrompt({ path: 'a.go', languageId: 'go', prefix: `\tx := ${'a'.repeat(400)}, `, suffix: 'rest()\n', limits });
   assert.equal(long.line, undefined);
 });
 
 test('type declarations bring their members: names and types, never values', () => {
-  // The struct from the session that prompted this (generated output).
   const go = [
     'type CreateOrderParams struct {',
     '\tKind      Kind',
@@ -64,7 +59,6 @@ test('type declarations bring their members: names and types, never values', () 
     extractSignature(go, 0),
     'type CreateOrderParams struct { Kind Kind; Tier string; CustomerType CustomerType; CustomerID string; Source pgtype.Text; Currency string }',
   );
-  // Asked not to (a definition outside the workspace): the head only, as before.
   assert.equal(extractSignature(go, 0, false), 'type CreateOrderParams struct');
 
   const ts = [
@@ -88,7 +82,6 @@ test('type declarations bring their members: names and types, never values', () 
     extractSignature(['pub enum Shape {', '    Circle { radius: f64 },', '    Square(f64),', '}'], 0),
     'pub enum Shape { Circle { radius: f64 }; Square(f64) }',
   );
-  // Values assigned inside a type body stay behind.
   assert.equal(
     extractSignature(['export enum Keys {', '  Live = "sk-live-0123456789abcdef",', '  Test = 2,', '}'], 0),
     'export enum Keys { Live; Test }',
@@ -96,11 +89,9 @@ test('type declarations bring their members: names and types, never values', () 
 });
 
 test('type declarations: only real type bodies, cut short when long', () => {
-  // A class or an object holds code and values, not just a shape.
   assert.equal(extractSignature(['export class Store {', '  private token = "abc";', '}'], 0), 'export class Store');
   assert.equal(extractSignature(['const type = {', '  apiKey: "sk-live-0123456789",', '};'], 0), 'const type');
   assert.equal(extractSignature(['export const config = {', '  retries: 3,', '};'], 0), 'export const config');
-  // No body in sight: the head.
   assert.equal(extractSignature(['export interface Order {'], 0), 'export interface Order');
   const many = ['interface Big {', ...Array.from({ length: 30 }, (_, i) => `  field${i}: string;`), '}'];
   const cut = extractSignature(many, 0);
@@ -108,7 +99,6 @@ test('type declarations: only real type bodies, cut short when long', () => {
   assert.ok(!cut.includes('field16'), cut);
   const wide = ['interface Wide {', ...Array.from({ length: 10 }, (_, i) => `  field${i}: ${'VeryLongTypeName'.repeat(5)};`), '}'];
   assert.ok(extractSignature(wide, 0).length <= 480);
-  // The body runs past what was read.
   assert.equal(extractSignature(['struct Point {', '    x: f64,', '    y: f64,'], 0), 'struct Point { x: f64; y: f64; … }');
 });
 
@@ -122,14 +112,11 @@ test('the call or literal the cursor is inside of, when it was opened further up
   assert.deepEqual(enclosingOpener(['  const total = computeTotal('], '    order.items,'), { linesUp: 1, character: 28 });
   assert.deepEqual(enclosingOpener(['const options: ReportOptions = {'], '  '), { linesUp: 1, character: 31 });
   assert.deepEqual(enclosingOpener(['  return {'], '    '), { linesUp: 1, character: 9 });
-  // Opened on the cursor's own line: nothing to add.
   assert.equal(enclosingOpener([call], '\t\t\tSource: pgtype.Text{String: '), undefined);
-  // A block of code is not a value being filled in.
   assert.equal(enclosingOpener(['  if (ready) {'], '    '), undefined);
   assert.equal(enclosingOpener(['func (c *core) open(ctx context.Context) (gen.Order, error) {'], '\t'), undefined);
   assert.equal(enclosingOpener(['  items.forEach((item) => {'], '    '), undefined);
   assert.equal(enclosingOpener(['export class Store {'], '  '), undefined);
-  // Closed again before the cursor, or nothing open at all.
   assert.equal(enclosingOpener(['  run({', '    a: 1,', '  });'], '  '), undefined);
   assert.equal(enclosingOpener([], '  '), undefined);
 });
@@ -172,13 +159,11 @@ test('signature: one line, without the body', () => {
 });
 
 test('signature: values never travel, only the shape of the declaration', () => {
-  // A secret in a file that no exclusion pattern covers.
   assert.equal(extractSignature(['export const API_KEY = "sk-live-0123456789abcdef0123456789";'], 0), 'export const API_KEY');
   assert.equal(extractSignature(["DB_PASSWORD = 'hunter2-but-longer'"], 0), 'DB_PASSWORD');
   assert.equal(extractSignature(['const RETRIES: number = 3;'], 0), 'const RETRIES: number');
   assert.equal(extractSignature(['export const config = {'], 0), 'export const config');
   assert.equal(extractSignature(['let enabled = true;'], 0), 'let enabled');
-  // Functions keep their parameters; only long string literals inside them are blanked.
   assert.equal(extractSignature(['const add = (a: number, b: number) => {'], 0), 'const add = (a: number, b: number) =>');
   assert.equal(extractSignature(['export const handler = async (event: Event) => {'], 0), 'export const handler = async (event: Event) =>');
   assert.equal(extractSignature(['def connect(host, token="ghp_abcdefghijklmnopqrstuvwxyz0123456789"):'], 0), 'def connect(host, token="…"):');
@@ -189,7 +174,6 @@ test('signature: values never travel, only the shape of the declaration', () => 
 test('signature: parameters spread over several lines are joined', () => {
   const lines = ['export function createOrder(', '  customer: Customer,', '  items: OrderItem[],', '): Promise<Order> {', '  // body'];
   assert.equal(extractSignature(lines, 0), 'export function createOrder( customer: Customer, items: OrderItem[], ): Promise<Order>');
-  // Never more than a few lines, and never an endless line.
   const endless = ['function f(', ...Array.from({ length: 50 }, (_, i) => `  arg${i}: string,`)];
   assert.ok(extractSignature(endless, 0).split(',').length <= 5);
   assert.ok(extractSignature(['const data = "' + 'x'.repeat(1000) + '";'], 0).length <= 240);

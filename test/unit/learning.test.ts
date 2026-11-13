@@ -30,8 +30,6 @@ function memoryStore(): KeyValueStore & { data: Map<string, unknown> } {
 
 const SELECT = { ...DEFAULT_SELECT, charsPerToken: 2.7 };
 
-// --- similarity ---------------------------------------------------------------------------------
-
 test('identifiers: distinct names, lower-cased, without keywords or one-letter names', () => {
   assert.deepEqual(
     [...identifiers('const userName = getUser(id).name; return userName;')].sort(),
@@ -50,8 +48,6 @@ test('jaccard: shared over union', () => {
   assert.equal(jaccard(set(), set()), 0);
 });
 
-// --- examples -----------------------------------------------------------------------------------
-
 test('examples: the most similar accepted completions are selected, at most two', () => {
   const store = new ExampleStore(memoryStore());
   store.add('typescript', 'const orders = await orderService.list(filters);\n', 'return orders.items.map(toOrderDto);');
@@ -62,7 +58,6 @@ test('examples: the most similar accepted completions are selected, at most two'
   const picked = store.select('typescript', 'const orders = await orderService.list(query);\n', SELECT);
   assert.equal(picked.length, 2);
   assert.equal(picked[0]?.accepted, 'return orders.items.map(toOrderDto);');
-  // Nothing about the health endpoint: it shares no identifiers with the query.
   assert.ok(picked.every((example) => !example.accepted.includes('status')));
 });
 
@@ -70,9 +65,7 @@ test('examples: unrelated code gets no examples at all', () => {
   const store = new ExampleStore(memoryStore());
   store.add('typescript', 'const orders = await orderService.list(filters);\n', 'return orders.items;');
   assert.deepEqual(store.select('typescript', 'function drawCircle(radius: number) {\n', SELECT), []);
-  // Other languages have their own lists.
   assert.deepEqual(store.select('python', 'orders = order_service.list(filters)\n', SELECT), []);
-  // Nothing to compare when the query has no identifiers.
   assert.deepEqual(store.select('typescript', '  }\n', SELECT), []);
 });
 
@@ -85,7 +78,6 @@ test('examples: the token budget is respected', () => {
   assert.equal(tight.length, 1);
   assert.equal(tight[0]?.accepted, 'return orders.items;');
   assert.deepEqual(store.select('typescript', before, { ...SELECT, maxTokens: 5 }), []);
-  // In the prompt they stay within ~300 tokens.
   const examples = store.select('typescript', before, SELECT);
   const withExamples = buildPrompt({
     path: 'a.ts',
@@ -116,7 +108,6 @@ test('examples: only the latest 200 per language are kept, and they persist', ()
 
   const reopened = new ExampleStore(backing);
   assert.equal(reopened.count('go'), 200);
-  // The oldest ones are gone, the newest are there.
   assert.deepEqual(reopened.select('go', 'value0 := compute0()\n', SELECT), []);
   assert.equal(reopened.select('go', 'value229 := compute229()\n', SELECT)[0]?.accepted, 'return value229');
 });
@@ -136,7 +127,6 @@ test('examples: duplicates are stored once, blanks never, and clear wipes everyt
 test('examples: corrupt stored data is ignored', () => {
   const backing = memoryStore();
   backing.data.set('ghostline.examples.v2', { ts: [null, { before: 1 }, { before: 'x', accepted: 'y', at: 1 }], py: 'nope' });
-  // What early versions stored the moment it was accepted, never checked, is dropped.
   backing.data.set('ghostline.examples.v1', { go: [{ before: 'c.queries.ListOrderItems(', accepted: 'ctx, orderID, nil', at: 1 }] });
   const store = new ExampleStore(backing);
   assert.equal(store.count('ts'), 1);
@@ -145,20 +135,16 @@ test('examples: corrupt stored data is ignored', () => {
   assert.equal(backing.data.get('ghostline.examples.v1'), undefined);
 });
 
-// --- adaptive trigger ---------------------------------------------------------------------------
-
 test('adaptive: below 10 % acceptance over the last 40 shown, the context is muted for 24 h', () => {
   let now = 1_000_000;
   const trigger = new AdaptiveTrigger(memoryStore(), () => now);
   let mutedAt = -1;
   for (let i = 0; i < 40; i++) {
-    // 3 accepted out of 40 = 7.5 %.
     if (trigger.record('typescript', 'after-dot', i < 3)) mutedAt = i;
     if (i < 39) assert.equal(trigger.isSuppressed('typescript', 'after-dot'), false, `shown ${i + 1}`);
   }
   assert.equal(mutedAt, 39);
   assert.equal(trigger.isSuppressed('typescript', 'after-dot'), true);
-  // Other contexts and languages are unaffected.
   assert.equal(trigger.isSuppressed('typescript', 'new-line'), false);
   assert.equal(trigger.isSuppressed('python', 'after-dot'), false);
 
@@ -166,7 +152,6 @@ test('adaptive: below 10 % acceptance over the last 40 shown, the context is mut
   assert.equal(trigger.isSuppressed('typescript', 'after-dot'), true);
   now += 1;
   assert.equal(trigger.isSuppressed('typescript', 'after-dot'), false);
-  // A clean slate afterwards: it takes another 40 to mute again.
   for (let i = 0; i < 39; i++) assert.equal(trigger.record('typescript', 'after-dot', false), false);
   assert.equal(trigger.record('typescript', 'after-dot', false), true);
 });
@@ -186,7 +171,6 @@ test('adaptive: it is the last 40 that count, not the whole history', () => {
     muted = trigger.record('go', 'new-line', false);
     needed++;
   }
-  // 37 ignored in a row leave 3 accepted in the window: 7.5 %.
   assert.equal(needed, 37);
 });
 
@@ -209,8 +193,6 @@ test('adaptive: state survives a restart and can be reported and cleared', () =>
   assert.equal(new AdaptiveTrigger(backing, () => now).isSuppressed('typescript', 'after-paren'), false);
 });
 
-// --- learning hooks -----------------------------------------------------------------------------
-
 function suggestion(overrides: Partial<SuggestionInfo> = {}): SuggestionInfo {
   return {
     id: 1,
@@ -228,7 +210,6 @@ function createLearning(settings = { learningExamples: true, adaptiveTrigger: tr
   const examples = new ExampleStore(memoryStore());
   const adaptive = new AdaptiveTrigger(memoryStore());
   const muted: string[] = [];
-  /** What each open document contains now. */
   const documents = new Map<string, string>([['file:///a.ts', 'const orders = await orderService.list(filters);\nreturn orders.items;\n']]);
   const scheduled: { task: () => void; ms: number }[] = [];
   const learning = new Learning({
@@ -247,7 +228,6 @@ function createLearning(settings = { learningExamples: true, adaptiveTrigger: tr
 test('learning: an accepted suggestion that stays in the file becomes an example for similar code', () => {
   const { learning, examples, scheduled } = createLearning({ learningExamples: true, adaptiveTrigger: true }, '- Use single quotes.');
   learning.onAccepted(suggestion());
-  // Not yet: accepting is not approving.
   assert.equal(examples.count('typescript'), 0);
   assert.equal(scheduled.length, 1);
   assert.equal(scheduled[0]?.ms, 10 * 60_000);
@@ -256,7 +236,6 @@ test('learning: an accepted suggestion that stays in the file becomes an example
   const extras = learning.promptExtras('typescript', 'const orders = await orderService.list(query);\n');
   assert.equal(extras.styleProfile, '- Use single quotes.');
   assert.deepEqual(extras.examples, [{ before: suggestion().before, accepted: 'return orders.items;' }]);
-  // The same check a second time (timer and confirmPending both firing) adds nothing.
   scheduled[0]?.task();
   learning.confirmPending();
   assert.equal(examples.count('typescript'), 1);
@@ -264,16 +243,13 @@ test('learning: an accepted suggestion that stays in the file becomes an example
 
 test('learning: a suggestion that was accepted and then fixed or removed never becomes an example', () => {
   const { learning, examples, documents } = createLearning();
-  // Three arguments accepted for a method that takes two, then corrected by hand.
   documents.set('file:///core.go', 'c.queries.ListOrderItems(ctx, orderID)\n');
   learning.onAccepted(suggestion({ documentKey: 'file:///core.go', languageId: 'go', before: '\tc.queries.ListOrderItems(', text: 'ctx, orderID, nil' }));
   learning.confirmPending();
   assert.equal(examples.count(), 0);
-  // The file was closed in the meantime: nothing to check against.
   learning.onAccepted(suggestion({ documentKey: 'file:///closed.ts' }));
   learning.confirmPending();
   assert.equal(examples.count(), 0);
-  // A formatter that realigns what was accepted does not count as a change.
   documents.set('file:///core.go', '\tKind:      in.Kind,\n\tTier:      defaultTier,\n');
   learning.onAccepted(suggestion({ documentKey: 'file:///core.go', languageId: 'go', before: '\t', text: 'Kind: in.Kind,\n\tTier: defaultTier,' }));
   learning.confirmPending();
@@ -303,8 +279,6 @@ test('learning: the adaptive trigger can be switched off', () => {
   assert.deepEqual(muted, []);
 });
 
-// --- style profile ------------------------------------------------------------------------------
-
 test('style: only hand-written source files are candidates', () => {
   for (const path of ['src/app.ts', 'lib/util.py', 'cmd/main.go', 'src/App.vue']) assert.equal(isStyleCandidate(path), true, path);
   for (const path of ['README.md', 'package.json', 'dist/app.min.js', 'types/index.d.ts', 'api/service_pb2.py', 'data.csv', 'Makefile']) {
@@ -328,7 +302,6 @@ test('style: picks medium files of the main language, one per folder first, test
   const picked = pickStyleFiles(candidates).map((candidate) => candidate.path);
   assert.equal(picked.length, 5);
   assert.deepEqual(new Set(picked), new Set(['src/a/service.ts', 'src/b/controller.ts', 'src/c/model.ts', 'src/f/routes.ts', 'src/a/other.ts']));
-  // The first four come from four different folders.
   assert.equal(new Set(picked.slice(0, 4).map((path) => path.split('/')[1])).size, 4);
 });
 
@@ -355,10 +328,8 @@ test('style: the request stays within ~6k tokens whatever the files', () => {
   assert.ok(prompt.length / 2.7 <= 6000, `${Math.round(prompt.length / 2.7)} tokens`);
   assert.ok(prompt.length / 2.7 > 5000);
   assert.equal(prompt.match(/<file path="/g)?.length, 5);
-  // Whole lines only, from the top of each file.
   assert.ok(prompt.includes('<file path="src/file0.ts">\nexport const value0 = 0;'));
   assert.ok(!/= \d+\n<\/file>/.test(prompt) || /;\n<\/file>/.test(prompt));
-  // Small files go in whole.
   assert.equal(buildStylePrompt([{ path: 'a.ts', content: 'const a = 1;\r\n' }], 2.7), '<file path="a.ts">\nconst a = 1;\n</file>');
   assert.equal(buildStylePrompt([], 2.7), '');
 });

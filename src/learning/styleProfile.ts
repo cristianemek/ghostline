@@ -1,11 +1,7 @@
 import { withoutStructuralTags } from '../completion/promptBuilder';
 
-/** Pure helpers for the "learn the project's style" command. */
-
 export interface StyleCandidate {
-  /** Workspace-relative path with forward slashes. */
   path: string;
-  /** Size in bytes. */
   size: number;
 }
 
@@ -19,18 +15,11 @@ export const IGNORED_FOLDERS: readonly string[] = [
   '__pycache__', 'coverage', '.vscode-test', '.idea', 'bin', 'obj',
 ];
 
-/** Files that say nothing about how the team writes code. */
 const NOT_HAND_WRITTEN = /(\.min\.|\.bundle\.|\.generated\.|\.gen\.|_pb2?\.|\.pb\.|\.d\.ts$|-lock\.|\.lock$|\.snap$)/i;
 const TEST_FILE = /(\.test\.|\.spec\.|_test\.|(^|\/)(tests?|__tests__|specs?|e2e|fixtures)\/)/i;
 
-/** The profile is sent with every request, so it has to stay small: ~200 tokens. */
 export const MAX_PROFILE_CHARS = 700;
-/**
- * Budget for the file contents sent when learning the style. With the CLI's fixed overhead the whole
- * request comes to about 6k tokens.
- */
 export const STYLE_INPUT_TOKENS = 5200;
-/** The heads of source files are dense code (~2.3 characters per token). */
 export const STYLE_CHARS_PER_TOKEN = 2.3;
 export const MAX_STYLE_FILES = 5;
 const IDEAL_FILE_BYTES = 4000;
@@ -52,10 +41,6 @@ export function isStyleCandidate(path: string): boolean {
   return SOURCE_EXTENSIONS.includes(extensionOf(path)) && !NOT_HAND_WRITTEN.test(path);
 }
 
-/**
- * Chooses the files that best represent the project's style: the dominant language (or the one being
- * edited), medium-sized hand-written files, spread over different folders, tests last.
- */
 export function pickStyleFiles<T extends StyleCandidate>(
   candidates: readonly T[],
   options: { max?: number; preferredExtension?: string } = {},
@@ -74,7 +59,6 @@ export function pickStyleFiles<T extends StyleCandidate>(
   const extensionOrder = preferred && counts.has(preferred) ? [preferred, ...byFrequency.filter((e) => e !== preferred)] : byFrequency;
 
   const score = (candidate: StyleCandidate): number =>
-    // Close to the ideal size is better; tests and tiny or huge files go to the back.
     -Math.abs(Math.log(candidate.size / IDEAL_FILE_BYTES)) - (TEST_FILE.test(candidate.path) ? 5 : 0);
 
   const picked: T[] = [];
@@ -83,8 +67,6 @@ export function pickStyleFiles<T extends StyleCandidate>(
     const ranked = usable
       .filter((candidate) => extensionOf(candidate.path) === extension)
       .sort((a, b) => score(b) - score(a) || a.path.localeCompare(b.path));
-    // Variety matters, but not more than quality: a huge, tiny or test file from a new folder is
-    // worse than a second good file from a folder already used.
     const good = ranked.filter(
       (candidate) => candidate.size >= MIN_GOOD_BYTES && candidate.size <= MAX_GOOD_BYTES && !TEST_FILE.test(candidate.path),
     );
@@ -103,7 +85,6 @@ export function pickStyleFiles<T extends StyleCandidate>(
   return picked;
 }
 
-/** The user message for the style request: the head of each file, sharing the token budget equally. */
 export function buildStylePrompt(
   files: ReadonlyArray<{ path: string; content: string }>,
   charsPerToken: number = STYLE_CHARS_PER_TOKEN,
@@ -124,7 +105,6 @@ export function buildStylePrompt(
     .join('\n\n');
 }
 
-/** Tidies the model's answer into the profile that is stored: no fences, no preamble, capped. */
 export function cleanStyleGuide(raw: string, maxChars: number = MAX_PROFILE_CHARS): string {
   let text = raw.replace(/\r\n?/g, '\n').trim();
   const fenced = /^```[^\n]*\n([\s\S]*?)\n?```$/.exec(text);
@@ -132,18 +112,10 @@ export function cleanStyleGuide(raw: string, maxChars: number = MAX_PROFILE_CHAR
   const lines = text
     .split('\n')
     .map((line) => line.trimEnd())
-    // Headings and "Here is the style guide:" lines carry no convention.
     .filter((line) => !/^#{1,6}\s/.test(line) && !/^(here('s| is| are)|sure\b|style guide:?$)/i.test(line.trim()));
   return capProfile(lines.join('\n').replace(/\n{3,}/g, '\n\n').trim(), maxChars);
 }
 
-/**
- * Cuts a profile (possibly hand-edited) to the size that is sent, on a line boundary.
- *
- * The profile is written by the model from file contents and then repeated in every prompt, so a
- * file crafted to make it say "</style><file …>" would be rewriting the prompt's structure from
- * then on. Those tags are removed; the rest is plain text the user can read in the editor.
- */
 export function capProfile(text: string, maxChars: number = MAX_PROFILE_CHARS): string {
   const trimmed = withoutStructuralTags(text).trim();
   if (trimmed.length <= maxChars) return trimmed;

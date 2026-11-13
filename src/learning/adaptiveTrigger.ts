@@ -2,9 +2,7 @@ import type { TriggerContext } from '../completion/trigger';
 import type { KeyValueStore } from '../usage/usageTracker';
 
 interface ContextState {
-  /** One character per automatic suggestion shown, oldest first: "1" accepted, "0" not. */
   outcomes: string;
-  /** Epoch ms until which automatic suggestions are muted here. */
   mutedUntil?: number;
 }
 
@@ -27,12 +25,6 @@ function isState(value: unknown): value is ContextState {
   return typeof state.outcomes === 'string' && /^[01]*$/.test(state.outcomes);
 }
 
-/**
- * Stops suggesting automatically where suggestions are almost never taken. Acceptance is tracked per
- * language and cursor context (after ".", after "(", new line, end of line); when fewer than 10 % of
- * the last 40 automatic suggestions in one of them were accepted, that context is muted for 24 hours.
- * Manual invocations are never affected and never counted.
- */
 export class AdaptiveTrigger {
   private states = new Map<string, ContextState>();
 
@@ -54,7 +46,6 @@ export class AdaptiveTrigger {
     }
   }
 
-  /** Records the outcome of one automatic suggestion. Returns true when this mutes the context. */
   record(languageId: string, context: TriggerContext, accepted: boolean): boolean {
     const key = `${languageId}:${context}`;
     const state = this.states.get(key) ?? { outcomes: '' };
@@ -64,7 +55,6 @@ export class AdaptiveTrigger {
       const acceptedCount = state.outcomes.split('1').length - 1;
       if (acceptedCount / WINDOW < MIN_ACCEPTANCE) {
         state.mutedUntil = this.now() + MUTE_MS;
-        // Start from scratch after the mute, otherwise the same history would mute it again at once.
         state.outcomes = '';
         muted = true;
       }

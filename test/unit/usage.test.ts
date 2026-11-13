@@ -82,7 +82,6 @@ test('tracker: counts requests, tokens, outcomes and latencies per day', () => {
   assert.equal(today.accepted, 1);
   assert.equal(today.localHits, 1);
   assert.equal(acceptanceRate(today), 0.5);
-  // Only successful requests feed the latency and input-token samples.
   assert.deepEqual(today.latencies, [900, 1100]);
   assert.deepEqual(tracker.latency(), { p50: 900, p95: 1100 });
   assert.equal(tracker.medianInputTokens(), 1502);
@@ -99,7 +98,6 @@ test('tracker: tokens of requests cut off before answering are kept apart, not c
   assert.equal(totalTokens(tracker.today()), 0);
   await tracker.flush();
   assert.equal(new UsageTracker(store, clock('2026-11-11T10:00:00').now).today().unconfirmedTokens, 1830);
-  // Days stored before this counter existed read as zero.
   store.data.set('ghostline.usage.v1', [{ date: '2026-11-11', requests: 3 }]);
   assert.equal(new UsageTracker(store, clock('2026-11-11T10:00:00').now).today().unconfirmedTokens, 0);
 });
@@ -113,25 +111,20 @@ test('tracker: spend by time, for the share of a Claude session that is ghostlin
 
   tracker.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.00025, totalMs: 900 });
   tracker.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.00025, totalMs: 900 });
-  // The session runs across midnight: the calendar day does not matter here.
   time.set('2026-11-12T00:20:00Z');
   tracker.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.0003, totalMs: 900 });
   close(tracker.spentSince(at('2026-11-11T22:00:00Z')), 0.0008);
   close(tracker.spentSince(at('2026-11-12T00:00:00Z')), 0.0003);
-  // Whole quarters of an hour: a session that began at 22:55 still counts the 22:45 quarter.
   close(tracker.spentSince(at('2026-11-11T22:55:00Z')), 0.0008);
   close(tracker.spentSince(at('2026-11-11T23:00:00Z')), 0.0003);
   assert.equal(tracker.spentSince(at('2026-11-12T00:30:00Z')), 0);
 
-  // A request cut off before answering is priced as if billed, at today's measured rate per token
-  // (which requests count as today's depends on the time zone the test runs in).
   const today = tracker.today();
   tracker.recordUnconfirmed(1900);
   close(tracker.spentSince(at('2026-11-12T00:00:00Z')), 0.0003 + 1900 * (today.costUsd / today.inputTokens));
   assert.equal(tracker.today().costUsd, today.costUsd);
   const total = tracker.spentSince(at('2026-11-11T22:00:00Z'));
 
-  // Another window adds to it instead of overwriting; both see the total after flushing.
   await tracker.flush();
   const other = new UsageTracker(store, time.now);
   close(other.spentSince(at('2026-11-11T22:00:00Z')), total);
@@ -140,7 +133,6 @@ test('tracker: spend by time, for the share of a Claude session that is ghostlin
   await tracker.flush();
   close(tracker.spentSince(at('2026-11-11T22:00:00Z')), total + 0.001);
 
-  // Kept for eight days, then dropped.
   time.set('2026-11-21T00:00:00Z');
   tracker.recordRequest({ status: 'ok', usage: usage(1900), costUsd: 0.00025, totalMs: 900 });
   await tracker.flush();
@@ -153,7 +145,6 @@ test('tracker: a cut-off request before anything was measured is priced as a typ
   const tracker = new UsageTracker(memoryStore(), clock('2026-11-11T10:00:00Z').now);
   tracker.recordUnconfirmed(1900);
   assert.ok(Math.abs(tracker.spentSince(0) - 0.0045) < 1e-9);
-  // A broken or foreign value in storage is ignored.
   const store = memoryStore();
   store.data.set('ghostline.spend.v1', [['x', 1], [Date.parse('2026-11-11T09:00:00Z'), -3], 'nope', [Date.parse('2026-11-11T09:00:00Z'), 0.5]]);
   assert.equal(new UsageTracker(store, clock('2026-11-11T10:00:00Z').now).spentSince(0), 0.5);
@@ -169,7 +160,7 @@ test('tracker: daily limit', () => {
   for (let i = 0; i < 3; i++) tracker.recordRequest({ status: 'ok', usage: usage(10), costUsd: 0, totalMs: 1 });
   assert.equal(tracker.overDailyLimit(4), false);
   assert.equal(tracker.overDailyLimit(3), true);
-  assert.equal(tracker.overDailyLimit(0), false); // 0 = no limit
+  assert.equal(tracker.overDailyLimit(0), false);
 });
 
 test('tracker: survives a restart through the store', async () => {
@@ -196,7 +187,7 @@ test('tracker: two windows add up instead of overwriting each other', async () =
   b.recordRequest({ status: 'ok', usage: usage(300), costUsd: 0, totalMs: 700 });
   await a.flush();
   await b.flush();
-  await a.flush(); // nothing pending: just picks up what b wrote
+  await a.flush();
 
   for (const tracker of [a, b, new UsageTracker(store, time.now)]) {
     assert.equal(tracker.today().requests, 3);
@@ -217,7 +208,6 @@ test('tracker: a new day starts at zero, old days are compacted and only 30 are 
   const stored = store.data.get('ghostline.usage.v1') as Array<{ date: string; latencies: number[]; p50?: number }>;
   assert.equal(stored.length, 30);
   assert.equal(stored[0]?.date, localDate(new Date(2026, 0, 40, 12)));
-  // Past days keep percentiles, not raw samples.
   assert.deepEqual(stored[1]?.latencies, []);
   assert.equal(stored[1]?.p50, 3900);
 
@@ -258,7 +248,6 @@ test('estimator: starts from the measured defaults', () => {
 
 test('estimator: learns overhead and ratio from varied real usage', () => {
   const estimator = new TokenEstimator();
-  // A different language/model: 3.2 chars per token and 700 tokens of overhead.
   for (let i = 0; i < 60; i++) {
     const chars = 500 + ((i * 37) % 30) * 100;
     estimator.observe(chars, Math.round(700 + chars / 3.2));
@@ -271,9 +260,7 @@ test('estimator: learns overhead and ratio from varied real usage', () => {
 test('estimator: with prompts of one size it still predicts that size correctly', () => {
   const estimator = new TokenEstimator();
   for (let i = 0; i < 30; i++) estimator.observe(2400 + (i % 3), 1900);
-  // Not enough spread to learn the ratio, so the default stays…
   assert.equal(estimator.charsPerToken, DEFAULT_CHARS_PER_TOKEN);
-  // …and the overhead absorbs the difference: the prediction at the operating point is right.
   assert.ok(Math.abs(estimator.estimateTotal(2400) - 1900) < 5);
 });
 
@@ -290,7 +277,6 @@ test('estimator: nonsense is clamped or ignored, and state round-trips', () => {
   const restored = new TokenEstimator(JSON.parse(JSON.stringify(estimator)));
   assert.equal(restored.charsPerToken, estimator.charsPerToken);
   assert.equal(restored.overheadTokens, estimator.overheadTokens);
-  // Garbage from storage falls back to the defaults.
   assert.equal(new TokenEstimator({ n: 'x' }).overheadTokens, DEFAULT_OVERHEAD_TOKENS);
   assert.equal(new TokenEstimator(null).charsPerToken, DEFAULT_CHARS_PER_TOKEN);
 });

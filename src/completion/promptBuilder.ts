@@ -1,18 +1,10 @@
 export interface PromptLimits {
-  /** Lines before the cursor, at most. */
   prefixLines: number;
-  /** Lines after the cursor, at most. */
   suffixLines: number;
   prefixChars: number;
   suffixChars: number;
-  /**
-   * Token budget for the whole user message. Examples and symbols are paid for out of it (the prefix
-   * is trimmed from the top to make room); the style profile only goes in when there is room to spare.
-   */
   targetTokens: number;
-  /** Ceiling for the whole user message; optional blocks are dropped before it is exceeded. */
   hardTokens: number;
-  /** Calibrated characters per token, used for every estimate here. */
   charsPerToken: number;
 }
 
@@ -25,46 +17,30 @@ export const DEFAULT_LIMITS: Omit<PromptLimits, 'targetTokens' | 'charsPerToken'
 };
 
 const TAG_NAMES = 'project|style|examples?|before|accepted|symbols|file|prefix|suffix|cursor|line|fix|region';
-/** Closing tags, and opening ones with attributes or self-closed: in any case and spacing. */
 const STRUCTURAL_TAG = new RegExp(`<\\/\\s*(?:${TAG_NAMES})\\s*>|<(?:${TAG_NAMES})(?:\\s[^>]*|\\s*\\/)>`, 'gi');
-/** A bare opening tag only as the prompts write it: `Promise<File>` in a declaration is a type. */
 const BARE_OPENING_TAG = new RegExp(`<(?:${TAG_NAMES})>`, 'g');
 
-/**
- * Text that goes into a prompt outside <file> (the project index, declarations, the style profile,
- * compiler messages) is taken from files of the workspace. A file written to say "</project><file …>"
- * there would be rewriting the structure of every prompt, so the tags that give the prompts their
- * structure are removed from it.
- */
+// file contents must not be able to forge the prompt's own tags
 export function withoutStructuralTags(text: string): string {
   return text.replace(STRUCTURAL_TAG, '').replace(BARE_OPENING_TAG, '');
 }
 
-/** The suffix matters less than the prefix: it never takes more than this share of the file budget. */
 const SUFFIX_SHARE = 0.25;
 const MIN_PREFIX_CHARS = 400;
-/** Hints never crowd out the code itself: the file keeps at least this share of the budget. */
 const MIN_FILE_SHARE = 0.6;
 
 export interface PromptExample {
-  /** The few lines that preceded an accepted completion. */
   before: string;
-  /** What was accepted. */
   accepted: string;
 }
 
 export interface PromptInput {
-  /** Workspace-relative path, only used as a hint for the model. */
   path: string;
   languageId: string;
-  /** Text before the cursor. May be the whole document: it is windowed here. */
   prefix: string;
-  /** Text after the cursor. */
   suffix: string;
-  /** Project style guide. When sent it goes first and is byte-identical between requests (the stable block). */
   styleProfile?: string;
   examples?: PromptExample[];
-  /** Signature lines of symbols used near the cursor. */
   symbols?: string[];
   limits: PromptLimits;
 }
@@ -73,20 +49,14 @@ export interface BuiltPrompt {
   text: string;
   chars: number;
   estimatedTokens: number;
-  /** The windows actually sent, needed again to post-process the answer. */
   prefix: string;
   suffix: string;
-  /**
-   * Set when the cursor is in the middle of a line: the prompt then asks for that whole line, and
-   * the answer must be turned into an insertion with `insertionFromLine`.
-   */
   line?: CursorLine;
   styleUsed: boolean;
   examplesUsed: number;
   symbolsUsed: number;
 }
 
-/** Last `maxLines` lines of the prefix (the current line counts as one), within `maxChars`. */
 export function takePrefix(prefix: string, maxLines: number, maxChars: number): string {
   let start = prefix.length;
   for (let lines = 0; lines < maxLines; lines++) {
@@ -102,14 +72,12 @@ export function takePrefix(prefix: string, maxLines: number, maxChars: number): 
     const cutAt = window.length - maxChars;
     const cut = window.slice(cutAt);
     const firstNewline = cut.indexOf('\n');
-    // Start on a line boundary, unless the current line alone is longer than the budget.
     if (window[cutAt - 1] === '\n' || firstNewline < 0) window = cut;
     else window = cut.slice(firstNewline + 1);
   }
   return window;
 }
 
-/** Rest of the current line plus the next `maxLines` lines, within `maxChars`. */
 export function takeSuffix(suffix: string, maxLines: number, maxChars: number): string {
   let end = -1;
   for (let lines = 0; lines <= maxLines; lines++) {
@@ -124,7 +92,6 @@ export function takeSuffix(suffix: string, maxLines: number, maxChars: number): 
   if (window.length > maxChars) {
     const cut = window.slice(0, maxChars);
     const lastNewline = cut.lastIndexOf('\n');
-    // End on a line boundary when there is one.
     if (window[maxChars] === '\n' || lastNewline < 0) window = cut;
     else window = cut.slice(0, lastNewline);
   }
@@ -158,24 +125,14 @@ function hintBlocks(blocks: Blocks): string[] {
   return parts;
 }
 
-/** Only whitespace or closing characters: the cursor is, for practical purposes, at the end of its line. */
 const ONLY_CLOSERS = /^[\s)\]}"'`;,]*$/;
-/** A cursor line longer than this on either side is not repeated: it would cost more than it helps. */
 const MAX_LINE_SIDE_CHARS = 300;
 
-/** The cursor's line, split at the cursor, when the request is for an insertion in the middle of it. */
 export interface CursorLine {
-  /** Without the indentation. */
   before: string;
   after: string;
 }
 
-/**
- * With code after the cursor on its own line the model has to work out an insertion, not a
- * continuation, and asked for the bare insertion it mostly answered with something unrelated. Asked
- * for the whole line as it should read it gets it right, so the line is
- * shown again on its own with the cursor marked, and the insertion is derived from the answer.
- */
 export function cursorLine(prefix: string, suffix: string): CursorLine | undefined {
   const newline = suffix.indexOf('\n');
   const after = newline < 0 ? suffix : suffix.slice(0, newline);
@@ -195,17 +152,6 @@ function render(input: PromptInput, prefix: string, suffix: string, blocks: Bloc
   ].join('\n');
 }
 
-/**
- * Builds the user message. Order is fixed: the stable block (style) first, then the variable blocks
- * (examples, symbols) and the file context last, right next to where the model starts answering.
- *
- * Budget:
- * - the file context gets the whole target by default;
- * - the style profile is added only when the file leaves room for it. In a long file the surrounding
- *   code already shows the style, and trading real code for a generic guide made suggestions worse;
- * - examples and symbols are specific to the cursor, so they do take room from the top of the prefix,
- *   but never more than 40 % of the budget.
- */
 export function buildPrompt(input: PromptInput): BuiltPrompt {
   const { limits } = input;
   const charsPerToken = Math.max(1, limits.charsPerToken);
@@ -236,7 +182,6 @@ export function buildPrompt(input: PromptInput): BuiltPrompt {
   }
   let text = render(input, prefix, suffix, blocks);
 
-  // Hard limit: give up the optional context first, then the suffix, and only then more of the prefix.
   const fits = (): boolean => tokens(text.length) <= limits.hardTokens;
   const rerender = (): void => {
     text = render(input, prefix, suffix, blocks);

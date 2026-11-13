@@ -3,25 +3,12 @@ import * as path from 'node:path';
 
 export const WORK_FOLDER_PREFIX = 'cwd-';
 
-/**
- * Where the CLI runs.
- *
- * The CLI obeys a `.claude/settings.json` in its working folder even with every other source of
- * settings switched off: environment variables (`ANTHROPIC_BASE_URL` sends each request, and the
- * login that goes with it, to another server), hooks and key helpers (commands it runs). So it is
- * never launched in the user's project. It runs in a folder of ghostline's own, inside the editor's
- * per-user storage (not in a temp directory other accounts can write to), and only while that
- * folder is empty.
- */
+// claude reads .claude/settings.json from its cwd (env, hooks): it only runs in an empty folder of ours
 export function createWorkFolder(parent: string): string {
   fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
   return fs.mkdtempSync(path.join(parent, WORK_FOLDER_PREFIX));
 }
 
-/**
- * Called before every launch: recreates the folder if something removed it, and throws when it is
- * not a real, empty folder. Nothing is launched then.
- */
 export function ensureEmptyWorkFolder(dir: string): void {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (fs.lstatSync(dir).isSymbolicLink()) {
@@ -35,7 +22,6 @@ export function ensureEmptyWorkFolder(dir: string): void {
   }
 }
 
-/** Removes working folders left behind by earlier sessions (only if empty: rmdir, never recursive). */
 export function removeStaleWorkFolders(parent: string, prefix: string, current: string, olderThanMs: number): void {
   let names: string[];
   try {
@@ -50,8 +36,6 @@ export function removeStaleWorkFolders(parent: string, prefix: string, current: 
     if (dir === current) continue;
     try {
       if (fs.statSync(dir).mtimeMs < limit) fs.rmdirSync(dir);
-    } catch {
-      // In use by another window, or not empty: leave it.
-    }
+    } catch {}
   }
 }

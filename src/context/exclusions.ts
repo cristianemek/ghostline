@@ -1,15 +1,4 @@
-/**
- * Sensitive-file filter. The extension checks documents with `vscode.languages.match` AND with
- * this dependency-free matcher, and treats a file as excluded when either says so.
- * This matcher also covers the places where there is only a path and no TextDocument.
- *
- * The matcher never builds a regular expression from a pattern: patterns can come from workspace
- * settings, and a crafted glob turned into nested ".*" groups can freeze the editor (six
- * double-star segments take a second per file, ten never finish). Matching here is plain loops
- * with memoisation, linear in pattern x path.
- */
 export const DEFAULT_EXCLUDE_PATTERNS: readonly string[] = [
-  // Secrets and keys.
   '**/.env',
   '**/.env.*',
   '**/*.pem',
@@ -26,7 +15,6 @@ export const DEFAULT_EXCLUDE_PATTERNS: readonly string[] = [
   '**/.aws/**',
   '**/.ssh/**',
   '**/*.kdbx',
-  // Added by the security review: folders named after secrets, and other well-known secret stores.
   '**/*secret*/**',
   '**/*credential*/**',
   '**/.git-credentials',
@@ -44,7 +32,6 @@ export const DEFAULT_EXCLUDE_PATTERNS: readonly string[] = [
 const MAX_PATTERN_CHARS = 200;
 const MAX_BRACE_EXPANSIONS = 64;
 
-/** `{a,b}` → one pattern per alternative. Null when the pattern expands into too many. */
 function expandBraces(pattern: string): string[] | null {
   const open = pattern.indexOf('{');
   if (open < 0) return [pattern];
@@ -57,7 +44,6 @@ function expandBraces(pattern: string): string[] | null {
       break;
     }
   }
-  // An unbalanced brace is just a character.
   if (close < 0) return [pattern];
   const head = pattern.slice(0, open);
   const body = pattern.slice(open + 1, close);
@@ -84,7 +70,7 @@ function expandBraces(pattern: string): string[] | null {
   return results;
 }
 
-/** Characters of `pattern` consumed by matching `char` at `index`; 0 when it does not match. */
+// globs are matched by hand: a RegExp built from one can hang the editor
 function matchOne(pattern: string, index: number, char: string): number {
   const token = pattern[index];
   if (token === '?') return 1;
@@ -109,7 +95,6 @@ function matchOne(pattern: string, index: number, char: string): number {
   return token === char ? 1 : 0;
 }
 
-/** One path segment against one pattern segment: `*`, `?` and `[...]`, without recursion. */
 function matchSegment(pattern: string, text: string): boolean {
   let p = 0;
   let t = 0;
@@ -126,7 +111,6 @@ function matchSegment(pattern: string, text: string): boolean {
       p += consumed;
       t++;
     } else if (starPattern >= 0) {
-      // Let the last `*` swallow one more character and try again.
       p = starPattern + 1;
       t = ++starText;
     } else {
@@ -157,7 +141,6 @@ function matchSegments(pattern: readonly string[], path: readonly string[]): boo
 
 const compiled = new Map<string, string[][] | null>();
 
-/** Null when the pattern is empty or too complex to be evaluated safely. */
 function compile(glob: string): string[][] | null {
   const cached = compiled.get(glob);
   if (cached !== undefined) return cached;
@@ -170,12 +153,10 @@ function compile(glob: string): string[][] | null {
         const segments: string[] = [];
         for (const raw of alternative.split('/')) {
           if (!raw) continue;
-          // "a**b" is not a path wildcard: inside a segment several stars mean the same as one.
           const segment = raw === '**' ? raw : raw.replace(/\*{2,}/g, '*');
           if (segment === '**' && segments.at(-1) === '**') continue;
           segments.push(segment);
         }
-        // A pattern may match starting at any directory: erring towards excluding more is the safe side.
         if (segments[0] !== '**') segments.unshift('**');
         return segments;
       });
@@ -185,7 +166,6 @@ function compile(glob: string): string[][] | null {
   return result;
 }
 
-/** True when the path matches the glob (case-insensitive, `\` and `/` equivalent). */
 export function matchesGlob(glob: string, path: string): boolean {
   const patterns = compile(glob);
   if (!patterns) return false;
@@ -197,7 +177,6 @@ export function isPathExcluded(path: string, patterns: readonly string[]): boole
   return patterns.some((pattern) => matchesGlob(pattern, path));
 }
 
-/** Patterns that will never match because they are empty or too complex; worth a warning. */
 export function unusablePatterns(patterns: readonly string[]): string[] {
   return patterns.filter((pattern) => pattern.trim() !== '' && compile(pattern) === null);
 }

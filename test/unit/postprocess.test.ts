@@ -57,14 +57,11 @@ test('answers that are not code are dropped', () => {
 });
 
 test('things that look like chatter but are real code survive', () => {
-  // `ok` is an everyday Go identifier.
   assert.equal(run('ok {', 'if v, ok := m[k]; '), 'ok {');
   assert.equal(run('null', 'return '), 'null');
   assert.equal(run('none', 'display: '), 'none');
   assert.equal(run('""', 'const s = '), '""');
-  // …but a bare empty string on its own line is the model saying "empty".
   assert.equal(run('""', 'const s = 1;\n'), '');
-  // Prose is the right completion inside a comment.
   assert.equal(run('Here is where the header is parsed', '// '), 'Here is where the header is parsed');
   assert.equal(run('I cannot be null here', '  # '), 'I cannot be null here');
 });
@@ -73,14 +70,12 @@ test('an explanation after the code is cut off', () => {
   const raw =
     'error) {\n\nThe catch block logs the spawn error and returns null. The cursor is inside the catch parameter list.';
   assert.equal(run(raw, '    } catch ('), 'error) {');
-  // Prose instead of code: nothing to show.
   assert.equal(run('This function already returns the right value, so nothing needs to be added here.', '  '), '');
   assert.equal(run('return x;\nNote that the value is cached between calls. It is never recomputed.', '  '), 'return x;');
 });
 
 test('sentences are kept where sentences belong', () => {
   const sentence = 'The parser reads the header first. Then it validates every field.';
-  // Line comment, block comment, docstring, string literal, prose documents.
   assert.equal(run(sentence, '  // '), sentence);
   assert.equal(run(sentence, '/**\n * Parses a file.\n * '), sentence);
   assert.equal(run(sentence, 'def parse():\n    """\n    '), sentence);
@@ -89,23 +84,19 @@ test('sentences are kept where sentences belong', () => {
     postprocess({ raw: sentence, prefix: '# Notes\n\n', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'markdown' }),
     sentence,
   );
-  // Text content of an element, and values in data files.
   assert.equal(run(sentence, 'return (\n  <p>\n    '), sentence);
   assert.equal(run(sentence, '<template>\n  <h1>'), sentence);
   assert.equal(
     postprocess({ raw: sentence, prefix: 'description: ', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'yaml' }),
     sentence,
   );
-  // An arrow is not a tag: an explanation after it is still an explanation.
   assert.equal(run(sentence, 'const run = () =>\n  '), '');
-  // English-looking code is not prose.
   assert.equal(run('return a if b else c', '    '), 'return a if b else c');
   assert.equal(run('SELECT name FROM users WHERE active ORDER BY name', ''), 'SELECT name FROM users WHERE active ORDER BY name');
   assert.equal(run('for item in items if item is not None:', '    '), 'for item in items if item is not None:');
 });
 
 test('real model outputs from the benchmark that used to slip through', () => {
-  // Thinking out loud with the answer at the end.
   assert.equal(
     run(
       'options.push(...)? No, the loop following is pushing into options array with `start` initialized. Completion: `0;`',
@@ -113,14 +104,11 @@ test('real model outputs from the benchmark that used to slip through', () => {
     ),
     '0;',
   );
-  // The whole line wrapped in backticks, with the code's own backticks escaped.
   assert.equal(
     run('`  return \\`${pad(value)}:${pad(time.getMinutes())}:${pad(time.getSeconds())}\\`;`', 'function clock(time: Date): string {\n  '),
     'return `${pad(value)}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;',
   );
-  // Indentation written as escape sequences.
   assert.equal(run("\\s\\s\\s'csv',", "  'ini',\n  "), "'csv',");
-  // A whole block from just above the cursor repeated before the new line.
   assert.equal(
     run(
       'onShown(): void {\n    // Nothing to learn until the suggestion is accepted or passed over.\n  }\n\n  onAccepted(suggestion: SuggestionInfo): void {',
@@ -128,7 +116,6 @@ test('real model outputs from the benchmark that used to slip through', () => {
     ),
     'onAccepted(suggestion: SuggestionInfo): void {',
   );
-  // Explanations that do not start with a capital letter.
   assert.equal(
     run('the value is computed above, so nothing is needed here. The loop already handles every case correctly.', '  '),
     '',
@@ -136,24 +123,19 @@ test('real model outputs from the benchmark that used to slip through', () => {
 });
 
 test('an answer in which the model second-guesses itself is not offered at all', () => {
-  // Seen in the typing simulation…
   assert.equal(run("status === 'success') day.errors++... wait — the completion should be something else entirely", '    } else if (record.'), '');
   assert.equal(run("status === 'success' ... wait—the chain ends with `else if (record.status` so this is wrong", '    } else if (record.'), '');
   assert.equal(run('return total;\nNo, the function returns void here', '  '), '');
   assert.equal(run('wait — the cursor is inside a string', '  '), '');
-  // …and in Go: the part before the doubt is a draft the model is taking back.
   assert.equal(run('status := ... no; the function ends after the status/content normalization.', '\t', '\n}', { indent: TABS }), '');
   assert.equal(run('"log slog.Error"? No —', '\tslog.Error(', ')', { indent: TABS }), '');
   assert.equal(run('return items... actually the loop above already returns', '  '), '');
   assert.equal(run('total += price ... then again the cart is empty here', '  '), '');
-  // A question mark or the word "no" in ordinary code is not a doubt.
   assert.equal(run('ok ? no : yes', 'const answer = '), 'ok ? no : yes');
   assert.equal(run('if (count === 0) return "no - none";', '  '), 'if (count === 0) return "no - none";');
-  // Variadic and spread syntax, and an ellipsis inside a string, are code.
   assert.equal(run('append(items, more...)', '\titems = ', '', { indent: TABS }), 'append(items, more...)');
   assert.equal(run('[...first, ...second]', 'const all = '), '[...first, ...second]');
   assert.equal(run('log("loading ... please wait a bit")', '  '), 'log("loading ... please wait a bit")');
-  // Real code and comments that merely contain the word are untouched.
   assert.equal(run('await waitFor(ready);', '  '), 'await waitFor(ready);');
   assert.equal(run('wait - 1', 'const remaining = '), 'wait - 1');
   assert.equal(run('wait — the queue must drain first', '  // '), 'wait — the queue must drain first');
@@ -163,7 +145,6 @@ test('a template literal where a value is expected is not mistaken for markdown'
   assert.equal(run('`Hello ${name}`', 'const greeting = '), '`Hello ${name}`');
   assert.equal(run('`${base}/orders`', 'fetch('), '`${base}/orders`');
   assert.equal(run('`total: ${total}`', '  return '), '`total: ${total}`');
-  // …but a statement on a line of its own cannot be one: that is the model quoting its answer.
   assert.equal(run('`const a = 1;`', '  '), 'const a = 1;');
 });
 
@@ -206,7 +187,6 @@ test('prefix overlap: a lone closer is a second closer, not a repeat', () => {
 });
 
 test('prefix overlap: no false positive in the middle of a word', () => {
-  // "t" is the end of "const" and the start of "t x": not a restatement.
   assert.equal(run('total = 1;', 'const '), 'total = 1;');
   assert.equal(run('t x = 1;', 'cons'), 't x = 1;');
 });
@@ -214,7 +194,6 @@ test('prefix overlap: no false positive in the middle of a word', () => {
 test('a first line that repeats the previous line is dropped', () => {
   assert.equal(run('const first = 1;\nconst second = 2;', 'const first = 1;\n'), 'const second = 2;');
   assert.equal(run("import { a } from './a';", "import { a } from './a';\n"), '');
-  // Short repeated lines ("}", "break;") are legitimate.
   assert.equal(run('}', '  }\n'), '}');
 });
 
@@ -222,7 +201,6 @@ test('suffix overlap: same line', () => {
   assert.equal(run('a, b)', 'foo(', ')'), 'a, b');
   assert.equal(run('a, b);', 'foo(', ');\nnext();'), 'a, b');
   assert.equal(run('hello"', 'const s = "', '";'), 'hello');
-  // A balanced call keeps its own closing paren.
   assert.equal(run('bar(a)', 'foo(', ')'), 'bar(a)');
   assert.equal(run('items[0]', 'use(', ')'), 'items[0]');
 });
@@ -233,7 +211,6 @@ test('a block wrapped in single backticks is markdown, not code', () => {
     run(raw, 'items, err := c.queries.ListOrderItems(ctx, orderID)\n\n\t', '\n\n\treturn pgtype.UUID{}, nil, nil\n}', { indent: TABS }),
     'if err != nil {\n\t\treturn pgtype.UUID{}, nil, fmt.Errorf("list context items: %w", err)\n\t}',
   );
-  // Where a value is expected it may be a real multi-line raw string or template literal.
   assert.equal(run('`SELECT id\nFROM users`', 'const query = ', ''), '`SELECT id\nFROM users`');
   assert.equal(run('`line one\nline two`', '\tsql := ', '', { indent: TABS }), '`line one\n\tline two`');
 });
@@ -245,47 +222,38 @@ test('mid-line: the insertion is what turns the current line into the whole line
     insertionFromLine('order, err := c.queries.CreateOrder(ctx, gen.CreateOrderParams{', '\t\torder, ', 'c.queries.CreateOrder(ctx, gen.CreateOrderParams{'),
     'err := ',
   );
-  // Indentation, a code fence, an echoed cursor mark or lines after the first do not matter.
   assert.equal(insertionFromLine(`\t\titems, err := ${call}\n\tif err != nil {`, '\titems', ` ${call}`), ', err :=');
   assert.equal(insertionFromLine('```go\nitems, err :=▮ ' + call + '\n```', '\titems', ` ${call}`), ', err :=');
-  // Something on either side was changed, nothing was added, or it is not the line at all: no completion.
   assert.equal(insertionFromLine(`msgs, err := ${call}`, '\titems', ` ${call}`), '');
   assert.equal(insertionFromLine('items, err := c.queries.ListOrderItems(ctx)', '\titems', ` ${call}`), '');
   assert.equal(insertionFromLine(`items ${call}`, '\titems', ` ${call}`), '');
   assert.equal(insertionFromLine('<none/>', '\titems', ` ${call}`), '');
   assert.equal(insertionFromLine('', '\titems', ` ${call}`), '');
 
-  // While the answer is still arriving: what it would insert so far.
   assert.equal(insertionSoFar('', '\titems'), '');
   assert.equal(insertionSoFar('ite', '\titems'), '');
   assert.equal(insertionSoFar('items, e', '\titems'), ', e');
   assert.equal(insertionSoFar(`items, err := ${call}`, '\titems'), `, err := ${call}`);
-  // It is writing some other line: no point in waiting for it.
   assert.equal(insertionSoFar('The line needs', '\titems'), null);
 });
 
 test('leftovers of the answer format are not code (seen with the real CLI)', () => {
   const go = (raw: string, prefix: string, suffix: string): string =>
     postprocess({ raw, prefix, suffix, maxLines: 6, indent: TABS, languageId: 'go' });
-  // A closing tag nothing opened.
   assert.equal(go('ctx, orderID</parameter>', '\tc.queries.ListOrderItems(', ')'), 'ctx, orderID');
-  // The prompt's own tags: the model is echoing, there is nothing to show.
   assert.equal(go('<prefix> cursor only </prefix>', '\titems', ' c.queries.ListOrderItems(ctx)'), '');
   assert.equal(go('</suffix>', '\tx := ', ''), '');
-  // Where tags are code they stay.
   assert.equal(postprocess({ raw: 'Hello</span>', prefix: '<span>', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'html' }), 'Hello</span>');
   assert.equal(
     postprocess({ raw: '<li>{item}</li>', prefix: '  return ', suffix: '', maxLines: 6, indent: SPACES_2, languageId: 'typescriptreact' }),
     '<li>{item}</li>',
   );
-  // A tag the completion itself opens is kept anywhere.
   assert.equal(go('"<b>bold</b>"', '\ts := ', ''), '"<b>bold</b>"');
 });
 
 test('go: the brace of a named literal written again is dropped; in a slice or map literal it opens an element', () => {
   const go = (raw: string, prefix: string, suffix: string): string =>
     postprocess({ raw, prefix, suffix, maxLines: 6, indent: TABS, languageId: 'go' });
-  // "…Params{{OrderID: …}".
   assert.equal(
     go('{OrderID: orderID, Role: gen.ItemKindProduct}', '\tc.queries.CreateItem(ctx, gen.CreateItemParams{', '})'),
     'OrderID: orderID, Role: gen.ItemKindProduct',
@@ -294,25 +262,20 @@ test('go: the brace of a named literal written again is dropped; in a slice or m
   assert.equal(go('{Name: "a"}, {Name: "b"}', '\titems := []Item{', '}'), '{Name: "a"}, {Name: "b"}');
   assert.equal(go('{"type": "text"}', '\tparts := []map[string]string{', '}'), '{"type": "text"}');
   assert.equal(go('{1, 2}', '\tgrid := map[string][]int{"a": ', '}'), '{1, 2}');
-  // Other languages are left alone.
   assert.equal(run('{ a: 1 }', 'call(Foo{', '})'), '{ a: 1 }');
 });
 
 test('in front of more code on the same line the separating space is part of the completion', () => {
   const rest = 'c.queries.CreateOrder(ctx, gen.CreateOrderParams{\n\t\t\tKind: in.Kind,';
-  // Seen with the real CLI: once with the space, once without it.
   assert.equal(run('err := ', '\t\torder, ', rest, { indent: TABS }), 'err := ');
   assert.equal(run('err :=', '\t\torder, ', rest, { indent: TABS }), 'err := ');
-  // The model restates the rest of the line: only the new part, with its space.
   assert.equal(run('err := c.queries.CreateOrder(ctx, gen.CreateOrderParams{', '\t\torder, ', rest, { indent: TABS }), 'err := ');
   assert.equal(run('total ', 'const ', 'compute(a, b);'), 'total ');
   assert.equal(run('first,', 'call(', 'second)'), 'first, ');
   assert.equal(run('=', 'const total ', 'compute(a, b);'), '= ');
-  // No space where the code has none, or where a closer or punctuation follows.
   assert.equal(run('=', 'run(retries', '3)'), '=');
   assert.equal(run('user', 'log(', '.name)'), 'user');
   assert.equal(run('a, b ', 'foo(', ')'), 'a, b');
-  // At the end of the line trailing whitespace is still dropped.
   assert.equal(run('err := ', '\t\torder, ', '\n\t\tnext()', { indent: TABS }), 'err :=');
 });
 
@@ -325,7 +288,6 @@ test('suffix overlap: following lines repeated at the end of the completion', ()
   const prefix = 'function f() {\n  const x = 1;\n  ';
   const suffix = '\n  return x;\n}\n';
   assert.equal(run('log(x);\n  return x;\n}', prefix, suffix), 'log(x);');
-  // The whole completion already exists below: nothing to show.
   assert.equal(run('return x;\n}', prefix, suffix), '');
 });
 
@@ -341,13 +303,11 @@ test('suffix overlap: a block that closes itself keeps its brace', () => {
 });
 
 test('suffix overlap: braces at different depths are different braces', () => {
-  // The inner block still needs its "}" even though the next line is also "}".
   const prefix = 'if (a) {\n  if (b) {\n    foo();\n  ';
   assert.equal(run('}', prefix, '\n}\n'), '}');
 });
 
 test('indentation: following lines are re-based on the current line', () => {
-  // Measured with the real model: first line off by one space, the rest one level too deep.
   const prefix = '    for (const order of orders) {\n      ';
   const raw =
     '       const list = groups.get(order.status) ?? [];\n        list.push(order);\n        groups.set(order.status, list);';
@@ -360,7 +320,6 @@ test('indentation: following lines are re-based on the current line', () => {
 test('indentation: an element left open puts what follows one level deeper, and its closing tag back', () => {
   const tsx = (raw: string, prefix: string, suffix = '', languageId = 'typescriptreact'): string =>
     postprocess({ raw, prefix, suffix, maxLines: 8, indent: SPACES_2, languageId });
-  // The model writes the children as if <ul> sat one level to the left of where the cursor is.
   const prefix = 'export function OrderList() {\n  const { orders } = useOrders();\n\n  return (\n    ';
   const raw =
     '<ul>\n    {orders.map((order) => (\n      <li key={order.id}>\n        {order.customer} — {formatPrice(order.total)}\n      </li>\n    ))}\n  </ul>';
@@ -368,21 +327,16 @@ test('indentation: an element left open puts what follows one level deeper, and 
     tsx(raw, prefix, '\n  )\n}\n'),
     '<ul>\n      {orders.map((order) => (\n        <li key={order.id}>\n          {order.customer} — {formatPrice(order.total)}\n        </li>\n      ))}\n    </ul>',
   );
-  // The element was opened by what is already on the line.
   assert.equal(tsx('\n<li>one</li>\n<li>two</li>', '    <ul>'), '\n      <li>one</li>\n      <li>two</li>');
-  // A closing tag after a child that opens nothing goes one level back.
   assert.equal(tsx('<li>one</li>\n</ul>', '    <ul>\n      '), '<li>one</li>\n    </ul>');
-  // Closed on its own line, self-closed, or void: nothing is opened.
   assert.equal(tsx('<p>one</p>\n<p>two</p>', '    '), '<p>one</p>\n    <p>two</p>');
   assert.equal(tsx('<Spinner />\n<Footer />', '    '), '<Spinner />\n    <Footer />');
   assert.equal(tsx('<br>\n<span>x</span>', '    ', '', 'html'), '<br>\n    <span>x</span>');
-  // Where there are no tags, a line ending in a generic opens nothing.
   assert.equal(tsx('\n{\n  return fetchOrder();\n}', 'function load(): Promise<Order>', '', 'typescript'), '\n{\n  return fetchOrder();\n}');
 });
 
 test('indentation: relative structure is preserved whatever base the model used', () => {
   const expected = 'if (x) {\n      foo();\n    }';
-  // Absolute, relative to zero, and with a different unit: same result.
   assert.equal(run('if (x) {\n      foo();\n    }', 'f() {\n    '), expected);
   assert.equal(run('if (x) {\n  foo();\n}', 'f() {\n    '), expected);
   assert.equal(run('if (x) {\n        foo();\n    }', 'f() {\n    '), expected);
@@ -391,7 +345,6 @@ test('indentation: relative structure is preserved whatever base the model used'
 test('indentation: block opened on the current line', () => {
   assert.equal(run('\nreturn 1;', 'function f() {'), '\n  return 1;');
   assert.equal(run('\nreturn 1', 'def f():', '', { indent: SPACES_4 }), '\n    return 1');
-  // An unclosed paren on the current line also means "one level deeper".
   assert.equal(run('a,\n    b\n);', 'call('), 'a,\n  b\n);');
   assert.equal(run('a,\n  b\n);', '  call('), 'a,\n    b\n  );');
 });
@@ -408,9 +361,7 @@ test('maxLines', () => {
   const raw = ['a();', 'b();', 'c();', 'd();', 'e();'].join('\n');
   assert.equal(run(raw, '', '', { maxLines: 2 }), 'a();\nb();');
   assert.equal(run(raw, '', '', { maxLines: 6 }), raw);
-  // The line break that starts a new line does not count as a suggested line.
   assert.equal(run('\na();\nb();\nc();', 'x();', '', { maxLines: 2 }), '\na();\nb();');
-  // No dangling blank line after truncation.
   assert.equal(run('a();\n\nb();', '', '', { maxLines: 2 }), 'a();');
 });
 
@@ -420,10 +371,8 @@ test('early stop: long answers and answers that turn into an explanation', () =>
   assert.equal(shouldStopEarly('a();\nb();\nc();', context), false);
   assert.equal(shouldStopEarly(Array.from({ length: 12 }, (_, i) => `line${i}();`).join('\n'), context), true);
   assert.equal(shouldStopEarly('x'.repeat(1300), context), true);
-  // A sentence in the middle of code: stop as soon as it reads like one.
   assert.equal(shouldStopEarly('return x;\n\nThe function returns the cached value. It', context), true);
   assert.equal(shouldStopEarly('return x;\n\nThe function returns', context), false);
-  // …but not inside a comment.
   assert.equal(shouldStopEarly('The function returns the cached value. It', { ...context, prefix: '  // ' }), false);
 });
 

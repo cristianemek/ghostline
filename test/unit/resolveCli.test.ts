@@ -67,7 +67,6 @@ test('windows: Path (mixed case) and quoted entries are understood', () => {
 });
 
 test('windows: PATHEXT is respected', () => {
-  // Without .EXE in PATHEXT the executable is not considered.
   const env = windows({ 'C:\\bin\\claude.exe': '' }, { PATH: 'C:\\bin', PATHEXT: '.CMD' });
   assert.equal(resolveCli('', env).ok, false);
 });

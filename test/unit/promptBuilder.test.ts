@@ -37,7 +37,6 @@ test('takePrefix keeps the last N lines, the current line included', () => {
 test('takePrefix cuts on a line boundary when over the character budget', () => {
   assert.equal(takePrefix('first line\nsecond line\nthird', 10, 14), 'third');
   assert.equal(takePrefix('first line\nsecond line\nthird', 10, 17), 'second line\nthird');
-  // A single line longer than the budget keeps its end (the part next to the cursor).
   assert.equal(takePrefix('x'.repeat(50) + 'END', 10, 5), 'xxEND');
 });
 
@@ -70,7 +69,6 @@ test('the stable block comes first and is byte-identical between requests', () =
   const stable = `<style>\n${style}\n</style>\n`;
   assert.ok(a.text.startsWith(stable));
   assert.ok(b.text.startsWith(stable));
-  // Order: style, examples, symbols, file.
   const full = buildPrompt(
     input({
       styleProfile: style,
@@ -91,33 +89,27 @@ test('file context stays within the token target: the prefix is trimmed from the
   const built = buildPrompt(input({ prefix, suffix }));
   const fileChars = built.prefix.length + built.suffix.length;
   assert.ok(fileChars <= 1000 * 2.4, `file context ${fileChars} chars`);
-  // The lines next to the cursor survive; the top of the window is what goes.
   assert.ok(built.prefix.endsWith(prefix.slice(-200)));
   assert.ok(!built.prefix.includes('line 0000'));
-  // Whole lines only.
   assert.ok(built.prefix.startsWith('line '));
-  // The suffix gets a quarter of the budget at most.
   assert.ok(built.suffix.length <= 1000 * 2.4 * 0.25);
   assert.ok(built.suffix.length > 0);
 });
 
 test('the style profile is sent only when the file leaves room for it', () => {
-  const style = '- Use single quotes and semicolons.\n'.repeat(18).trim(); // ~650 characters
-  // A long file fills the budget with real code, which already shows the style: no profile.
+  const style = '- Use single quotes and semicolons.\n'.repeat(18).trim();
   const longPrefix = lines(400, 50);
   const longSuffix = '\n' + lines(100, 50, 'after');
   const plain = buildPrompt(input({ prefix: longPrefix, suffix: longSuffix }));
   const long = buildPrompt(input({ prefix: longPrefix, suffix: longSuffix, styleProfile: style }));
   assert.equal(long.styleUsed, false);
   assert.equal(long.text, plain.text);
-  // A new or short file has little to go on: the profile goes first, and nothing is trimmed for it.
   const shortPrefix = lines(12, 40);
   const short = buildPrompt(input({ prefix: shortPrefix, suffix: '', styleProfile: style }));
   assert.equal(short.styleUsed, true);
   assert.ok(short.text.startsWith(`<style>\n${style}\n</style>\n`));
   assert.equal(short.prefix, shortPrefix);
   assert.ok(short.estimatedTokens <= 1000 + 40);
-  // In between: it is all or nothing, the file is never trimmed to fit the profile.
   const medium = buildPrompt(input({ prefix: lines(40, 50), suffix: '', styleProfile: style }));
   assert.equal(medium.styleUsed, false);
   assert.equal(medium.prefix, lines(40, 50));
@@ -132,10 +124,8 @@ test('examples are paid for out of the same budget: the prefix shrinks, the tota
   assert.equal(withExamples.examplesUsed, 1);
   assert.ok(withExamples.prefix.length < plain.prefix.length);
   assert.ok(Math.abs(withExamples.chars - plain.chars) < 120, `${withExamples.chars} vs ${plain.chars}`);
-  // Still whole lines, still ending at the cursor.
   assert.ok(withExamples.prefix.endsWith(prefix.slice(-200)));
   assert.ok(withExamples.prefix.startsWith('line '));
-  // A short file is not trimmed at all: there is room for both.
   const short = buildPrompt(input({ prefix: lines(8, 40), suffix: '', examples }));
   assert.equal(short.prefix, lines(8, 40));
 });
@@ -195,7 +185,6 @@ test('hard limit holds for every size of input', () => {
           limits: { ...LIMITS, hardTokens },
         }),
       );
-      // The fixed wrapper (tags, path, style) is the floor; beyond it the limit must hold.
       const floor = Math.ceil(buildPrompt(input({ prefix: '', suffix: '', styleProfile: 'short style' })).chars / 2.4) + 1;
       assert.ok(built.estimatedTokens <= Math.max(hardTokens, floor), `hard ${hardTokens}, ${count} lines → ${built.estimatedTokens}`);
     }

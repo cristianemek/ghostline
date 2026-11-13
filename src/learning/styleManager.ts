@@ -22,14 +22,11 @@ export type Launcher = { command: string; prefixArgs: string[] } | { error: stri
 export interface StyleManagerDeps {
   context: vscode.ExtensionContext;
   getConfig(): GhostlineConfig;
-  /** How to start the CLI, or why it cannot be started. */
   launcher(): Launcher;
-  /** The CLI's working folder: the same empty folder the completions use. */
   cwd(): string;
   charsPerToken(): number;
   usage: UsageTracker;
   log(line: string): void;
-  /** The profile changed (learned, edited or cleared). */
   onChange(): void;
 }
 
@@ -38,17 +35,11 @@ const MAX_CANDIDATES = 300;
 const MAX_LISTED = 40;
 const STYLE_TIMEOUT_MS = 60_000;
 
-/**
- * The project's style profile: a ~200-token guide written by Claude from a handful of source files,
- * on demand. It lives as a plain file in the workspace's private storage so it can be reviewed and
- * edited, and it is sent first in every prompt (the stable block).
- */
 export class StyleManager {
   private text: string | undefined;
 
   constructor(private readonly deps: StyleManagerDeps) {}
 
-  /** What goes into the prompt: the saved profile, capped to its token budget. */
   get profile(): string | undefined {
     const capped = this.text ? capProfile(this.text) : '';
     return capped || undefined;
@@ -70,7 +61,6 @@ export class StyleManager {
     this.deps.onChange();
   }
 
-  /** The command: propose files, let the user confirm them, ask Claude, save and open the result. */
   async learn(): Promise<void> {
     if (!this.fileUri) {
       void vscode.window.showWarningMessage('ghostline: abre una carpeta para aprender el estilo del proyecto.');
@@ -127,7 +117,6 @@ export class StyleManager {
     );
   }
 
-  /** Generates and saves the profile from these files. No UI: `learn` and the tests call it. */
   async learnFrom(uris: readonly vscode.Uri[], signal?: AbortSignal): Promise<string> {
     const { deps } = this;
     const fileUri = this.fileUri;
@@ -135,7 +124,6 @@ export class StyleManager {
     const patterns = deps.getConfig().excludePatterns;
     const files: Array<{ path: string; content: string }> = [];
     for (const uri of uris.slice(0, MAX_STYLE_FILES)) {
-      // Belt and braces: an excluded file never leaves the machine, whoever asked for it.
       if (isPathExcluded(uri.fsPath, patterns)) continue;
       const content = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
       files.push({ path: vscode.workspace.asRelativePath(uri, false), content });
@@ -178,7 +166,6 @@ export class StyleManager {
     return guide;
   }
 
-  /** Opens the profile in an editor. */
   async edit(): Promise<void> {
     const uri = this.fileUri;
     if (!uri || !this.text) {
@@ -190,7 +177,6 @@ export class StyleManager {
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: false });
   }
 
-  /** Picks up edits made by hand. */
   onSaved(document: vscode.TextDocument): void {
     const uri = this.fileUri;
     if (!uri || document.uri.toString() !== uri.toString()) return;
@@ -209,9 +195,7 @@ export class StyleManager {
     if (uri) {
       try {
         await vscode.workspace.fs.delete(uri);
-      } catch {
-        // There was no profile.
-      }
+      } catch {}
     }
     this.deps.onChange();
   }

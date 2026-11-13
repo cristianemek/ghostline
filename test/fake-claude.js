@@ -1,15 +1,3 @@
-// Stand-in for `claude -p --input-format stream-json --output-format stream-json`.
-// Reads one JSON line per user message from stdin and answers like the real CLI (2.1.322),
-// without spending tokens. Behaviour is controlled with environment variables:
-//
-//   FAKE_MODE        ok (default) | error | hang | crash | crash-on-start | noisy
-//   FAKE_TEXT        completion text (default "fake completion"); "{turn}" is replaced by the turn number
-//   FAKE_DELAY_MS    delay before the first token (default 20)
-//   FAKE_CHUNK_MS    delay between text chunks (default 0)
-//   FAKE_CHUNKS      number of text deltas the answer is split into (default 2)
-//   FAKE_API_KEY_SOURCE  value reported in system/init (default "none")
-//   FAKE_ARGS_FILE   when set, argv is written there as JSON (to assert on the flags)
-//   FAKE_INPUT_TOKENS / FAKE_OUTPUT_TOKENS  usage numbers (defaults 1200 / 12)
 const fs = require('fs');
 
 const mode = process.env.FAKE_MODE || 'ok';
@@ -77,7 +65,6 @@ async function answer(message) {
       message: { model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: 'Invalid API key · Please run /login' }], usage: usage(0) },
       session_id: sessionId,
     });
-    // Same shape as the real CLI: subtype "success" but is_error true.
     emit({
       type: 'result', subtype: 'success', is_error: true, result: 'Invalid API key · Please run /login',
       duration_ms: 5, duration_api_ms: 0, total_cost_usd: 0, num_turns: 1, usage: usage(0), session_id: sessionId,
@@ -89,10 +76,7 @@ async function answer(message) {
   const completion = (process.env.FAKE_TEXT || 'fake completion')
     .replace('{turn}', String(turn))
     .replace('{promptLength}', String(prompt.length));
-  // In the middle of a line the prompt asks for the whole line: answer it with the completion in
-  // place of the cursor mark, as a model following the instructions would.
   const line = /<line>([^\n]*)▮([^\n]*)<\/line>\s*$/.exec(prompt);
-  // A correction: the region back with its placeholders filled in, as a model would.
   const region = /<fix>/.test(prompt) ? /<region>\n([\s\S]*?)\n<\/region>/.exec(prompt) : null;
   const text = region
     ? region[1].replace('expression', 'true').replace('condition', 'a > b')
@@ -164,7 +148,6 @@ process.stdin.on('data', (chunk) => {
     if (message.type === 'user') queue = queue.then(() => answer(message));
   }
 });
-// Like the real CLI: stay alive until stdin closes, then finish the pending work and exit.
 process.stdin.on('end', () => {
   if (mode === 'hang') process.exit(0);
   queue.then(() => process.exit(0));

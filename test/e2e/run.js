@@ -1,8 +1,3 @@
-// End-to-end runner: starts a real VS Code (isolated profile, no other extensions) with ghostline
-// loaded from this folder and the fake CLI in place of `claude`, then runs test/e2e/suite.js inside
-// the extension host. No tokens are spent.
-//
-//   npm run test:e2e            (set VSCODE_EXE to use a specific VS Code binary)
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -10,11 +5,6 @@ const path = require('path');
 
 const repo = path.resolve(__dirname, '..', '..');
 
-/**
- * VSCODE_EXE if set; otherwise a private copy of VS Code downloaded once into .vscode-test/ (the
- * usual way to test extensions). The installed VS Code is deliberately not used: it shares state
- * with the user's editor and refuses to start while an update is being applied.
- */
 async function findVsCode() {
   if (process.env.VSCODE_EXE) return process.env.VSCODE_EXE;
   const { downloadAndUnzipVSCode } = require('@vscode/test-electron');
@@ -31,8 +21,6 @@ const workspace = path.join(root, 'workspace');
 const resultFile = path.join(root, 'result.json');
 fs.mkdirSync(path.join(workspace, 'src'), { recursive: true });
 fs.mkdirSync(path.join(workspace, '.vscode'), { recursive: true });
-// A repository can bring Claude Code settings of its own. The CLI obeys the ones in its working
-// folder, so it must never be launched here: these would send every request to another server.
 fs.mkdirSync(path.join(workspace, '.claude'), { recursive: true });
 fs.writeFileSync(path.join(workspace, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:1' } }));
 fs.writeFileSync(
@@ -69,7 +57,6 @@ fs.writeFileSync(
     '',
   ].join('\n'),
 );
-// A symbol defined in another file, and one defined in a file that is excluded.
 fs.writeFileSync(
   path.join(workspace, 'src', 'lib.ts'),
   [
@@ -102,19 +89,16 @@ fs.writeFileSync(
     '  return total;',
     '}',
     '',
-    // The cursor goes on the empty line inside the literal: the type is named on the line above.
     'export const options: ReportOptions = {',
     '  ',
     '};',
     '',
   ].join('\n'),
 );
-// Corrections: a snippet left with its placeholders, which the TypeScript server reports as errors.
 fs.writeFileSync(
   path.join(workspace, 'src', 'broken.ts'),
   ['export function pick(a: number, b: number): number {', '  switch (expression) {', '    case condition:', '      return a;', '  }', '  return b;', '}', ''].join('\n'),
 );
-// A line to accept a suggestion on.
 fs.writeFileSync(path.join(workspace, 'src', 'accept.ts'), 'const first = \nconst second = \n');
 fs.writeFileSync(
   path.join(workspace, 'src', 'many.js'),
@@ -122,22 +106,15 @@ fs.writeFileSync(
 );
 fs.writeFileSync(path.join(workspace, '.env.local'), 'E2E_FAKE_TOKEN=not-a-real-secret\nOTHER=1\n');
 fs.writeFileSync(path.join(workspace, 'notes.md'), '# Notes\n\nSome text\n');
-// Latency: lines that end at a trigger point ("= ") and lines that end in the middle of a word.
 fs.writeFileSync(path.join(workspace, 'src', 'flight.ts'), Array.from({ length: 20 }, (_, i) => `const sum${i} = `).join('\n') + '\n');
 fs.writeFileSync(path.join(workspace, 'src', 'pace.ts'), Array.from({ length: 12 }, (_, i) => (i % 2 ? `const total${i} = ` : `const partial${i}`)).join('\n') + '\n');
 fs.writeFileSync(path.join(workspace, 'src', 'errors.ts'), Array.from({ length: 20 }, (_, i) => `const item${i} = ${i};`).join('\n') + '\n');
 fs.writeFileSync(path.join(workspace, 'src', 'seen.py'), Array.from({ length: 10 }, (_, i) => `value_${i} = ${i}`).join('\n') + '\n');
 
-// The user's own settings (what the suite changes through the settings API also lands here).
 fs.mkdirSync(path.join(root, 'user-data', 'User'), { recursive: true });
 fs.writeFileSync(
   path.join(root, 'user-data', 'User', 'settings.json'),
-  // Symbol context is on by default; here the user has switched it off, and the repository below
-  // must not be able to switch it back on. The symbols step turns it on for itself.
-  // `recycleEvery` is one of the settings no longer listed in the Settings UI: still read from here.
   JSON.stringify(
-    // Corrections are on by default; here they are switched on only by the step that tests them, so
-    // that the other steps' request counts do not depend on what the TypeScript server reports.
     {
       'ghostline.debounceMs': 0,
       'ghostline.context.symbols': false,
@@ -150,8 +127,6 @@ fs.writeFileSync(
     2,
   ),
 );
-// What a hostile repository would ship: every one of these tries to make ghostline send or spend
-// more than the user configured, and must be ignored.
 fs.writeFileSync(
   path.join(workspace, '.vscode', 'settings.json'),
   JSON.stringify(
@@ -174,8 +149,6 @@ fs.writeFileSync(
   ),
 );
 
-// --typing: the typing simulation (latency.js) against the REAL CLI, with default settings and a
-// real source file to type in. Everything else on this page is the regular suite with the fake CLI.
 const typingMode = process.argv.includes('--typing');
 if (typingMode) {
   fs.copyFileSync(path.join(repo, 'src', 'usage', 'usageTracker.ts'), path.join(workspace, 'src', 'typing.ts'));
@@ -214,7 +187,6 @@ function median(values) {
   return sorted[Math.floor((sorted.length - 1) / 2)];
 }
 
-/** Results of the typing simulation: one line per typed line and mode, then the totals. */
 function printTyping(rows) {
   console.log('\nlínea  modo   espera tras la última tecla   peticiones  tokens entrada  sugerencia');
   for (const row of rows) {
@@ -240,9 +212,7 @@ function report(code) {
   let result = null;
   try {
     result = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
-  } catch {
-    // The suite never got to write its result.
-  }
+  } catch {}
   if (result) {
     for (const step of result.steps) console.log(`${step.ok ? 'ok    ' : 'FALLA '} ${step.name}${step.ok ? '' : `\n         ${step.error}`}`);
   }
@@ -251,9 +221,7 @@ function report(code) {
   console.log(passed ? `\n${result.steps.length} comprobaciones correctas` : `\nLa prueba falló (código de salida de VS Code: ${code})`);
   try {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  } catch {
-    // Leftovers stay in the OS temp folder.
-  }
+  } catch {}
   process.exit(passed ? 0 : 1);
 }
 

@@ -27,13 +27,10 @@ test('in the middle of a line auto mode only asks where an insertion makes sense
   assert.equal(midLineAllowsAuto('\t\torder,', call), true);
   assert.equal(midLineAllowsAuto('  const ', 'compute(a, b);'), true);
   assert.equal(midLineAllowsAuto('  call(first, ', 'last)'), true);
-  // Nothing typed on the line yet, or nothing but whitespace after the cursor.
   assert.equal(midLineAllowsAuto('\t\t', call), false);
   assert.equal(midLineAllowsAuto('  const x = ', '  '), false);
-  // Inside a word: a rename, not an insertion.
   assert.equal(midLineAllowsAuto('\t\torder', call), false);
   assert.equal(midLineAllowsAuto('  const tot', 'al = 1;'), false);
-  // Inside a string or a comment it is text being edited.
   assert.equal(midLineAllowsAuto('  log("user ', 'created");'), false);
   assert.equal(midLineAllowsAuto('  // the ', 'first item'), false);
   assert.equal(midLineAllowsAuto('  # the ', 'first item'), false);
@@ -42,9 +39,7 @@ test('in the middle of a line auto mode only asks where an insertion makes sense
 
 test('only a short plain insertion counts as typed by hand', () => {
   assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 0, text: 'a' }]), 11);
-  // A pair closed by the editor.
   assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 0, text: '()' }]), 12);
-  // Deletion, replacement, paste or accepted suggestion, multi-cursor, nothing.
   assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 1, text: '' }]), undefined);
   assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 3, text: 'a' }]), undefined);
   assert.equal(typedInsertionEnd([{ rangeOffset: 10, rangeLength: 0, text: 'err := ' }]), undefined);
@@ -61,7 +56,6 @@ test('only a short plain insertion counts as typed by hand', () => {
 test('context classification', () => {
   assert.equal(classifyContext('  order, ', 'c.run(ctx)'), 'mid-line');
   assert.equal(classifyContext('  foo(', 'a, b)'), 'mid-line');
-  // Closing characters after the cursor do not make it the middle of a line.
   assert.equal(classifyContext('  foo(', ')'), 'after-paren');
   assert.equal(classifyContext('    ', 'existing();'), 'new-line');
   assert.equal(classifyContext(''), 'new-line');
@@ -75,31 +69,25 @@ test('context classification', () => {
 });
 
 test('a request in the air stays useful while the typing agrees with its answer', () => {
-  // Nothing answered yet, or nothing typed yet: no disagreement.
   assert.equal(agreesWithTyping('', 'res', false), true);
   assert.equal(agreesWithTyping('result = 1;', '', false), true);
-  // As far as both go, same text.
   assert.equal(agreesWithTyping('result = 1;', 'res', false), true);
   assert.equal(agreesWithTyping('res', 'result = ', false), true);
   assert.equal(agreesWithTyping('result = 1;', 'rex', false), false);
   assert.equal(agreesWithTyping('re', 'data', false), false);
-  // Leading whitespace of the answer is dropped on a blank line, kept elsewhere.
   assert.equal(agreesWithTyping('    return x;', 'ret', true), true);
   assert.equal(agreesWithTyping(' 5;', '5', false), false);
   assert.equal(agreesWithTyping(' 5;', ' 5', false), true);
-  // A markdown wrapper cannot be judged yet.
   assert.equal(agreesWithTyping('```ts\nreturn x;', 'zzz', false), true);
   assert.equal(agreesWithTyping('a\r\nb', 'a\nb', false), true);
 });
 
 test('typing rate: more than 6 keystrokes per second over the last 2 seconds is fast', () => {
   const rate = new TypingRate();
-  // 12 keystrokes in 2 s is exactly 6/s: not fast yet.
   for (let i = 0; i < 12; i++) rate.record(1000 + i * 100);
   assert.equal(rate.isFast(2200), false);
   rate.record(2250);
   assert.equal(rate.isFast(2250), true);
-  // After a pause the old keystrokes fall out of the window.
   assert.equal(rate.isFast(4300), false);
 });
 
@@ -110,15 +98,10 @@ test('typing rate: slow typing is never fast', () => {
 });
 
 test('the short wait adapts to the typing rhythm', () => {
-  // No recent typing to go by: the configured short wait.
   assert.equal(eagerDelay(350, 120, undefined), 120);
-  // A key every 110 ms: 176 ms without one is a pause.
   assert.equal(eagerDelay(350, 120, 110), 176);
-  // A slow typist: never longer than the normal debounce.
   assert.equal(eagerDelay(350, 120, 300), 350);
-  // A very fast one: never shorter than the configured short wait.
   assert.equal(eagerDelay(350, 120, 40), 120);
-  // Setting both the same switches the distinction off.
   assert.equal(eagerDelay(350, 350, 110), 350);
   assert.equal(eagerDelay(200, 350, undefined), 200);
 
@@ -126,7 +109,6 @@ test('the short wait adapts to the typing rhythm', () => {
   assert.equal(rate.medianGap(0), undefined);
   for (const stamp of [1000, 1100, 1210, 1300, 1420, 1900]) rate.record(stamp);
   assert.equal(rate.medianGap(1900), 110);
-  // Old keystrokes fall out of the window.
   assert.equal(rate.medianGap(5000), undefined);
 });
 

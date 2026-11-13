@@ -5,24 +5,18 @@ import { CliWorker, type TurnResult } from './worker';
 export type WorkerMode = 'single-use' | 'persistent';
 
 export interface PoolConfig {
-  /** Resolved executable, launched without a shell. */
   command: string;
-  /** Arguments placed before the CLI flags (the tests use it to run `node fake-claude.js`). */
   commandPrefixArgs?: string[];
   model: string;
   effort: string;
   systemPromptFile: string;
-  /** An empty folder of our own, never the project folder: the CLI obeys settings it finds there. */
   cwd: string;
   mode: WorkerMode;
-  /** Persistent mode: requests served by one process before its conversation is thrown away. */
   recycleEvery: number;
   requestTimeoutMs: number;
-  /** A standby process that has waited this long is retired. */
   standbyMaxIdleMs: number;
   promptCache: boolean;
   env?: NodeJS.ProcessEnv;
-  /** Appended after the standard flags (used by the benchmark to compare CLI configurations). */
   extraArgs?: string[];
 }
 
@@ -39,25 +33,15 @@ export interface RequestOptions {
 }
 
 export interface CompletionOutcome extends TurnResult {
-  /** Time spent getting hold of a process before the prompt could be written. */
   waitForWorkerMs: number;
-  /** How long the process had been running when it received the prompt (small = cold start). */
   workerAgeMs: number;
 }
 
 const MAX_BACKOFF_MS = 30_000;
 
-/**
- * Keeps exactly one pre-launched CLI process waiting so a completion never pays the process start-up.
- *
- * single-use (default): every request takes the standby process, uses it for one message and throws it
- * away, so each suggestion is a brand-new conversation with a constant, small cost.
- * persistent: one process serves up to `recycleEvery` requests before being replaced by the standby.
- */
 export class WorkerPool {
   private standby: CliWorker | null = null;
   private standbyTimer: NodeJS.Timeout | null = null;
-  /** Persistent mode only: the long-lived process, idle between requests. */
   private active: CliWorker | null = null;
   private activeTimer: NodeJS.Timeout | null = null;
   private inFlight: AbortController | null = null;
@@ -71,7 +55,6 @@ export class WorkerPool {
     private readonly events: PoolEvents = {},
   ) {}
 
-  /** Makes sure a standby process exists. Cheap to call often (on typing, on focus…). */
   warm(): void {
     if (this.disposed || this.standby?.alive) return;
     if (Date.now() < this.nextSpawnAllowedAt) return;
@@ -79,7 +62,6 @@ export class WorkerPool {
     this.armStandbyTimer();
   }
 
-  /** At most one request is in flight: a new one cancels the previous one. */
   async request(prompt: string, options: RequestOptions = {}): Promise<CompletionOutcome> {
     this.inFlight?.abort();
     const controller = new AbortController();
@@ -126,14 +108,12 @@ export class WorkerPool {
       const active = this.active;
       this.clearActiveTimer();
       if (active?.alive && !active.busy && active.turnsServed < this.config.recycleEvery) return active;
-      // Either a recycle is due or the process died: drop it and promote the standby.
       active?.retire();
       this.active = this.takeStandby();
       this.replenish();
       return this.active;
     }
     const worker = this.takeStandby();
-    // Launch the next standby right away so it warms up while this request is being served.
     this.replenish();
     return worker;
   }
@@ -152,8 +132,6 @@ export class WorkerPool {
       else worker.kill();
       return;
     }
-    // Single use: a clean result lets the CLI exit on its own; anything else is killed on the spot
-    // so it stops generating output.
     if (result.status === 'ok' && !result.stoppedEarly) worker.retire();
     else worker.kill();
   }
@@ -203,8 +181,6 @@ export class WorkerPool {
   private handleExit(worker: CliWorker, detail: string): void {
     if (worker === this.active) this.active = null;
     if (worker !== this.standby) return;
-    // A standby process should only ever exit because we retired it. Back off so a broken
-    // installation does not turn into a respawn loop; the next request still spawns on demand.
     this.standby = null;
     this.clearStandbyTimer();
     if (this.disposed) return;
@@ -217,8 +193,6 @@ export class WorkerPool {
   private armStandbyTimer(): void {
     this.clearStandbyTimer();
     this.standbyTimer = setTimeout(() => {
-      // Idle for too long: retire it instead of keeping a stale process (and its memory) around.
-      // warm() or the next request launches a fresh one.
       const stale = this.standby;
       this.standby = null;
       this.standbyTimer = null;
@@ -232,7 +206,6 @@ export class WorkerPool {
     this.standbyTimer = null;
   }
 
-  /** Persistent mode: an idle long-lived process is retired after the same idle time as a standby. */
   private armActiveTimer(): void {
     this.clearActiveTimer();
     this.activeTimer = setTimeout(() => {

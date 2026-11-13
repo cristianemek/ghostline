@@ -1,4 +1,3 @@
-/** Keywords shared by most languages: they would make any two snippets look alike. */
 const COMMON_WORDS = new Set([
   'abstract', 'and', 'as', 'async', 'await', 'bool', 'boolean', 'break', 'case', 'catch', 'class', 'const',
   'continue', 'def', 'default', 'do', 'double', 'elif', 'else', 'end', 'enum', 'except', 'export', 'extends',
@@ -11,7 +10,6 @@ const COMMON_WORDS = new Set([
 
 const IDENTIFIER = /[A-Za-z_$][A-Za-z0-9_$]*/g;
 
-/** The distinct identifiers of a snippet, lower-cased, without language keywords or one-letter names. */
 export function identifiers(text: string): Set<string> {
   const found = new Set<string>();
   for (const match of text.matchAll(IDENTIFIER)) {
@@ -21,7 +19,6 @@ export function identifiers(text: string): Set<string> {
   return found;
 }
 
-/** Jaccard similarity of two sets: shared elements over all elements, 0…1. */
 export function jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   const [small, large] = a.size <= b.size ? [a, b] : [b, a];

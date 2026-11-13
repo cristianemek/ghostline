@@ -1,5 +1,3 @@
-// Runs inside the VS Code extension host (see run.js). Exercises the real provider against real
-// documents, settings and `vscode.languages.match`, with the fake CLI answering "a + b;".
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,12 +27,10 @@ async function run() {
       new vscode.CancellationTokenSource().token,
     );
   const endOf = (document, line) => document.lineAt(line).text.length;
-  // Always the user's settings: most of ghostline's settings cannot be set by a workspace at all.
   const setting = async (name, value) => {
     await settings().update(name, value, vscode.ConfigurationTarget.Global);
     await sleep(150);
   };
-  // The suite asks for suggestions back to back; without this none would count as "seen".
   api.provider.minVisibleMs = 0;
   const step = async (name, body) => {
     try {
@@ -46,7 +42,6 @@ async function run() {
   };
 
   await step('seguridad: los ajustes que trae un repositorio no pueden hacer que ghostline envíe o gaste más', async () => {
-    // .vscode/settings.json of this workspace sets hostile values for all of these (see run.js).
     const config = api.config();
     assert.equal(config.model, 'sonnet');
     assert.equal(config.effort, 'low');
@@ -57,19 +52,14 @@ async function run() {
     assert.equal(config.workerMode, 'single-use');
     assert.equal(config.prefixLines, 60);
     assert.equal(config.maxLines, 6);
-    // Exclusions and disabled languages add up; the defaults are still there.
     assert.ok(config.excludePatterns.includes('**/.env.*'));
     assert.ok(config.excludePatterns.includes('**/only-this.txt'));
     assert.ok(config.disabledLanguages.includes('markdown'));
-    // The user switched the project context off; the repository asks for it and gets nothing.
     assert.ok(!(await api.systemPrompt()).includes('<project>'), 'el índice del proyecto se activó desde el repositorio');
-    // A setting that is not listed in the Settings UI is still read from the user's settings.
     assert.equal(config.recycleEvery, 5);
   });
 
   await step('seguridad: la CLI se lanza en una carpeta vacía de ghostline, nunca en el proyecto', async () => {
-    // The CLI obeys a .claude/settings.json in its working folder, and this workspace brings one
-    // that points it at another server (see run.js).
     const fs = require('fs');
     const path = require('path');
     const marker = 'carpeta de trabajo de la CLI: ';
@@ -133,7 +123,6 @@ async function run() {
   });
 
   await step('auto: en mitad de una línea solo dispara justo donde se acaba de teclear, y se puede apagar', async () => {
-    // "  return result;" → "  return x, result;" typed one character at a time, as a keyboard would.
     const type = async (line, character, text) => {
       for (const [index, char] of [...text].entries()) {
         const edit = new vscode.WorkspaceEdit();
@@ -144,7 +133,6 @@ async function run() {
     };
     const before = api.today().requests;
     await type(6, 9, 'x, ');
-    // Somewhere else on the line, or inside a word: nothing.
     assert.equal(await ask(sample, 6, 2), undefined);
     assert.equal(await ask(sample, 6, 14), undefined);
     assert.equal(api.today().requests, before);
@@ -157,14 +145,12 @@ async function run() {
     assert.equal(items[0].insertText, 'a + b;');
     assert.equal(api.today().requests, before + 1);
     assert.ok(api.logLines().some((line) => line.includes(' typescript mid-line ')), 'falta el contexto mid-line en el log');
-    // A paste is not typing.
     const paste = new vscode.WorkspaceEdit();
     paste.insert(sample.uri, new vscode.Position(10, 8), 'value, other, ');
     await vscode.workspace.applyEdit(paste);
     await sleep(50);
     assert.equal(await ask(sample, 10, 22), undefined);
     assert.equal(api.today().requests, before + 1);
-    // Leave the file as it was for the steps that follow.
     const undo = new vscode.WorkspaceEdit();
     undo.delete(sample.uri, new vscode.Range(10, 8, 10, 22));
     undo.delete(sample.uri, new vscode.Range(6, 9, 6, 12));
@@ -205,7 +191,6 @@ async function run() {
   });
 
   await step('barra de estado: % del tope diario propio · % de una sesión de Claude gastado por ghostline', async () => {
-    // 5 requests out of 1.500, and what they cost against a session worth 80 $.
     assert.match(api.statusText(), /^\$\(ghostline-ghost\) <1% · Claude (0%|<0,01%|\d+(,\d+)?%)$/);
   });
 
@@ -237,7 +222,6 @@ async function run() {
     const before = api.today().requests;
     const items = await ask(doc, 0, endOf(doc, 0));
     assert.equal(items?.length, 1);
-    // What accepting does: the text goes into the document, then the item's command runs.
     const insert = async (text) => {
       const edit = new vscode.WorkspaceEdit();
       edit.insert(doc.uri, new vscode.Position(0, endOf(doc, 0)), text);
@@ -248,7 +232,6 @@ async function run() {
     await vscode.commands.executeCommand('ghostline._accepted', items[0].command.arguments[0]);
     assert.equal(await ask(doc, 0, endOf(doc, 0)), undefined);
     assert.equal(api.today().requests, before + 1);
-    // Elsewhere in the file nothing is held back, and the manual trigger always asks.
     assert.equal((await ask(doc, 1, endOf(doc, 1)))?.length, 1);
     await ask(doc, 0, endOf(doc, 0), INVOKE);
     assert.equal(api.today().requests, before + 3);
@@ -267,8 +250,6 @@ async function run() {
     }
     assert.ok(api.logLines().some((line) => line.includes('apiKeySource none')));
   });
-
-  // --- Aprendizaje ------------------------------------------------------------------------------
 
   const lastPrompt = () => {
     const lines = api.logLines().filter((line) => / prompt \(\d+ caracteres/.test(line));
@@ -292,7 +273,6 @@ async function run() {
     const orders = await open('src/orders.ts');
     const before = api.exampleCount();
     const accept = (items) => vscode.commands.executeCommand('ghostline._accepted', items[0].command.arguments[0]);
-    // Off by default: accepting stores nothing.
     const off = await ask(orders, 2, endOf(orders, 2));
     assert.equal(off?.length, 1);
     await accept(off);
@@ -300,14 +280,12 @@ async function run() {
     assert.equal(api.exampleCount(), before);
 
     await setting('learning.examples', true);
-    // Accepted, but the text is not in the file when it is checked (fixed or deleted): no example.
     api.provider.clearCache();
     const fixed = await ask(orders, 2, endOf(orders, 2));
     assert.equal(fixed?.length, 1);
     await accept(fixed);
     api.confirmExamples();
     assert.equal(api.exampleCount(), before);
-    // Accepted and still there: an example, but only once it has been checked.
     api.provider.clearCache();
     const first = await ask(orders, 2, endOf(orders, 2));
     assert.equal(first?.length, 1);
@@ -326,7 +304,6 @@ async function run() {
     assert.ok(prompt.includes('<examples>'), 'el prompt no lleva ejemplos');
     assert.ok(prompt.includes('<accepted>a + b;</accepted>'), 'falta el texto aceptado');
     assert.ok(prompt.includes('orderService.list(filters);'), 'falta el contexto del ejemplo');
-    // The examples come before the file.
     assert.ok(prompt.indexOf('<examples>') < prompt.indexOf('<file path='));
     await setting('learning.examples', false);
   });
@@ -370,7 +347,6 @@ async function run() {
     assert.ok(api.logLines().some((entry) => entry.includes('disparo adaptativo') && entry.includes('javascript')));
     const manual = await ask(many, line + 1, endOf(many, line + 1), INVOKE);
     assert.equal(manual?.length, 1);
-    // Another language is not affected.
     const sampleAgain = await open('src/sample.ts');
     assert.equal((await ask(sampleAgain, 2, endOf(sampleAgain, 2)))?.length, 1);
   });
@@ -381,10 +357,8 @@ async function run() {
     api.provider.minVisibleMs = 750;
     try {
       assert.equal((await ask(seen, 0, endOf(seen, 0)))?.length, 1);
-      // The next request arrives right away: the first suggestion was never really on screen.
       assert.equal((await ask(seen, 1, endOf(seen, 1)))?.length, 1);
       assert.equal(python()?.shown ?? 0, 0);
-      // This one stays up long enough to have been read, and is then passed over.
       await sleep(900);
       assert.equal((await ask(seen, 2, endOf(seen, 2)))?.length, 1);
       assert.equal(python()?.shown, 1);
@@ -399,8 +373,6 @@ async function run() {
     let line = 0;
     const next = (context) => ask(errors, line, endOf(errors, line), context);
     try {
-      // New CLI processes will now fail like a logged-out CLI. The one already waiting was launched
-      // before the change and still answers: use it up.
       process.env.FAKE_MODE = 'error';
       assert.equal((await next())?.length, 1);
       line++;
@@ -408,7 +380,6 @@ async function run() {
       for (let i = 0; i < 3; i++, line++) assert.equal(await next(), undefined);
       assert.equal(api.today().requests, before + 3);
 
-      // Paused: no process is launched, no request is counted.
       before = api.today().requests;
       assert.equal(await next(), undefined);
       line++;
@@ -417,10 +388,8 @@ async function run() {
       assert.match(api.statusText(), /^\$\(ghostline-ghost\) \$\(warning\) /);
       assert.ok(api.logLines().some((entry) => entry.includes('en pausa') && entry.includes('Invalid API key')));
 
-      // A manual request is never blocked…
       assert.equal(await next(INVOKE), undefined);
       assert.equal(api.today().requests, before + 1);
-      // …and once the CLI works again (after the broken process that was left waiting), it closes the pause.
       process.env.FAKE_MODE = 'ok';
       assert.equal(await next(INVOKE), undefined);
       assert.equal((await next(INVOKE))?.length, 1);
@@ -432,9 +401,6 @@ async function run() {
     }
   });
 
-  // --- Latencia ---------------------------------------------------------------------------------
-
-  /** A provider call whose token can be cancelled, as the editor does on the next keystroke. */
   const askCancellable = (document, line, character) => {
     const source = new vscode.CancellationTokenSource();
     return {
@@ -451,14 +417,12 @@ async function run() {
   await step('latencia: seguir tecleando lo que el modelo responde aprovecha la petición ya lanzada', async () => {
     const flight = await open('src/flight.ts');
     try {
-      // New CLI processes answer after 700 ms; the one already waiting is still fast: use it up.
       process.env.FAKE_DELAY_MS = '700';
       assert.equal((await ask(flight, 0, endOf(flight, 0)))?.length, 1);
 
       const before = api.today().requests;
       const first = askCancellable(flight, 1, endOf(flight, 1));
       await sleep(200);
-      // The user types "a +", which is how the answer ("a + b;") begins. The editor cancels the call.
       first.cancel();
       assert.equal(await first.result, undefined);
       await typeAt(flight, 1, 'a +');
@@ -466,7 +430,6 @@ async function run() {
       const items = await ask(flight, 1, endOf(flight, 1));
       const waited = Date.now() - started;
       assert.equal(items?.[0]?.insertText, ' b;');
-      // One request served both positions, and it landed sooner than a new one could have.
       assert.equal(api.today().requests, before + 1);
       assert.ok(waited < 650, `tardó ${waited} ms`);
     } finally {
@@ -478,8 +441,8 @@ async function run() {
     const flight = await open('src/flight.ts');
     try {
       process.env.FAKE_DELAY_MS = '500';
-      assert.equal((await ask(flight, 3, endOf(flight, 3)))?.length, 1); // uses up the 700 ms process
-      assert.equal((await ask(flight, 4, endOf(flight, 4)))?.length, 1); // …and the next one waiting
+      assert.equal((await ask(flight, 3, endOf(flight, 3)))?.length, 1);
+      assert.equal((await ask(flight, 4, endOf(flight, 4)))?.length, 1);
 
       const before = api.today().requests;
       const shownBefore = api.today().shown;
@@ -488,23 +451,16 @@ async function run() {
       await sleep(100);
       first.cancel();
       await typeAt(flight, 5, 'a');
-      // The real cursor sits where the user stopped typing.
       const end = new vscode.Position(5, endOf(flight, 5));
       vscode.window.activeTextEditor.selection = new vscode.Selection(end, end);
-      // Nobody asks while the answer is on its way. When it lands, ghostline asks the editor to
-      // trigger again, and the editor itself calls the provider, which shows what is left of it.
       await sleep(1000);
       assert.equal(api.refreshCount(), refreshes + 1);
       assert.equal(api.today().shown, shownBefore + 1, 'el editor no volvió a pedir la sugerencia');
-      // Typing on, or asking again, is served from it: still a single request.
       const items = await ask(flight, 5, endOf(flight, 5));
       assert.equal(items?.[0]?.insertText, ' + b;');
       assert.equal(api.today().requests, before + 1);
     } finally {
       delete process.env.FAKE_DELAY_MS;
-      // The editor now has a real suggestion on screen and would keep asking on its own as the
-      // document changes. Close it and park the cursor where automatic requests never fire, so the
-      // remaining steps only see the calls they make themselves.
       await vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
       const home = new vscode.Position(0, 0);
       vscode.window.activeTextEditor.selection = new vscode.Selection(home, home);
@@ -525,11 +481,8 @@ async function run() {
       first.cancel();
       await typeAt(flight, 9, 'zzz');
       const items = await ask(flight, 9, endOf(flight, 9));
-      // The first answer ("a + b;") is useless after "zzz"; a second request answers for the new position.
       assert.equal(items?.[0]?.insertText, 'a + b;');
       assert.equal(api.today().requests, before + 2);
-      // A cursor that moves elsewhere drops whatever is in the air. The request had already been sent
-      // and the CLI reports nothing for it: its tokens are kept apart as an estimate, not counted as free.
       const unconfirmed = api.today().unconfirmedTokens;
       const moved = askCancellable(flight, 11, endOf(flight, 11));
       await sleep(250);
@@ -548,7 +501,7 @@ async function run() {
 
   await step('latencia: espera corta en una línea vacía, ninguna tras aceptar, completa dentro de la línea', async () => {
     const pace = await open('src/pace.ts');
-    await sleep(600); // let the slow processes of the previous step drain
+    await sleep(600);
     await ask(pace, 1, endOf(pace, 1));
     await ask(pace, 3, endOf(pace, 3));
     await setting('debounceMs', 600);
@@ -558,30 +511,24 @@ async function run() {
         const items = await ask(pace, line, endOf(pace, line));
         return { items, ms: Date.now() - started };
       };
-      // "const partial4": in the middle of a word, the full 600 ms.
       const midWord = await timed(4);
       assert.equal(midWord.items?.length, 1);
       assert.ok(midWord.ms >= 580, `mitad de palabra: ${midWord.ms} ms`);
-      // "const total5 = ": inside a line the wait is the full one too, even right after "=".
       const insideLine = await timed(5);
       assert.equal(insideLine.items?.length, 1);
       assert.ok(insideLine.ms >= 580, `dentro de la línea: ${insideLine.ms} ms`);
-      // By default nothing is anticipated: an empty line waits like any other place.
       const emptyByDefault = await timed(12);
       assert.equal(emptyByDefault.items?.length, 1);
       assert.ok(emptyByDefault.ms >= 580, `línea vacía, por defecto: ${emptyByDefault.ms} ms`);
       api.provider.clearCache();
-      // With "line", an empty line gets the short wait: one bet per new line.
       await setting('speculation', 'line');
       const emptyLine = await timed(12);
       assert.equal(emptyLine.items?.length, 1);
       assert.ok(emptyLine.ms >= 110 && emptyLine.ms < 520, `línea vacía: ${emptyLine.ms} ms`);
-      // Right after accepting, no wait at all, even in the middle of a word.
       await vscode.commands.executeCommand('ghostline._accepted', emptyLine.items[0].command.arguments[0]);
       const afterAccept = await timed(8);
       assert.equal(afterAccept.items?.length, 1);
       assert.ok(afterAccept.ms < 450, `tras aceptar: ${afterAccept.ms} ms`);
-      // With speculation off nothing is anticipated: the original behaviour.
       await setting('speculation', 'off');
       const off = await timed(9);
       assert.equal(off.items?.length, 1);
@@ -592,14 +539,11 @@ async function run() {
     }
   });
 
-  // --- Contexto de símbolos ---------------------------------------------------------------------
-
   await step('símbolos: la firma de una definición de otro archivo llega al prompt; de un archivo excluido, nunca', async () => {
     await setting('context.symbols', true);
     await setting('debug.logPrompts', true);
     const uses = await open('src/usesLib.ts');
     const column = uses.lineAt(4).text.indexOf('computeTotal');
-    // The TypeScript server needs a moment after the first file opens.
     let ready = false;
     for (let attempt = 0; attempt < 80 && !ready; attempt++) {
       const found = await vscode.commands.executeCommand(
@@ -612,7 +556,6 @@ async function run() {
     }
     assert.ok(ready, 'el servidor de TypeScript no resolvió la definición en 40 s');
 
-    // The lookup has 300 ms; a cold first try just leaves the answer cached for the next one.
     let prompt = '';
     for (let attempt = 0; attempt < 4 && !prompt.includes('<symbols>'); attempt++) {
       api.provider.clearCache();
@@ -627,7 +570,6 @@ async function run() {
     );
     assert.ok(prompt.indexOf('<symbols>') < prompt.indexOf('<file path='));
 
-    // Defined in src/secretStore.ts, which matches the default exclusions: its signature stays local.
     const secretColumn = uses.lineAt(5).text.indexOf('loadSecretKey');
     const secretDefinition = await vscode.commands.executeCommand(
       'vscode.executeDefinitionProvider',
@@ -641,8 +583,6 @@ async function run() {
       assert.ok(!lastPrompt().includes('vaultName'), 'la firma de un archivo excluido llegó al prompt');
       await sleep(400);
     }
-    // The cursor inside a literal opened on the line above: the type named there comes with its
-    // members (names and types), read by ghostline through the language server.
     prompt = '';
     for (let attempt = 0; attempt < 4 && !prompt.includes('ReportOptions {'); attempt++) {
       api.provider.clearCache();
@@ -655,22 +595,18 @@ async function run() {
       `campos inesperados: ${prompt.slice(0, 300)}`,
     );
 
-    // The project index: what the workspace declares, in the system prompt the CLI is started with.
     const system = await api.systemPrompt();
     assert.ok(system.startsWith('You are a code autocompletion engine'), 'falta el prompt de sistema de siempre');
     assert.ok(system.includes('<project>') && system.trimEnd().endsWith('</project>'), 'falta el bloque del proyecto');
     assert.ok(system.includes('// src/lib.ts\nexport function computeTotal(items: number[], taxRate: number): number\n'), system.slice(-600));
     assert.ok(system.includes('export interface ReportOptions { title: string; taxRate: number; currency?: string }'));
     assert.ok(system.includes('// src/sample.ts\nexport function add(a: number, b: number): number\n'));
-    // Never from an excluded file, and nothing that is not source code.
     assert.ok(!system.includes('loadSecretKey') && !system.includes('secretStore'), 'un archivo excluido llegó al índice');
     assert.ok(!system.includes('E2E_FAKE_TOKEN') && !system.includes('notes.md'));
     assert.ok(api.logLines().some((line) => /índice del proyecto: \d+ archivos, \d+ declaraciones/.test(line)));
-    // A request made now says so in the log, and the processes were restarted with the new prompt.
     api.provider.clearCache();
     assert.equal((await ask(uses, 4, endOf(uses, 4)))?.length, 1);
     assert.ok(api.logLines().some((line) => /\[\+.*índice\]/.test(line)), 'la petición no indica que lleva el índice');
-    // Saving a file that declares something new brings the index up to date.
     const added = new vscode.WorkspaceEdit();
     added.insert(uses.uri, new vscode.Position(uses.lineCount, 0), '\nexport function freshlyAdded(count: number): string {\n  return String(count);\n}\n');
     await vscode.workspace.applyEdit(added);
@@ -694,7 +630,6 @@ async function run() {
     const errorsNow = () => vscode.languages.getDiagnostics(broken.uri).filter((item) => item.severity === vscode.DiagnosticSeverity.Error);
     for (let attempt = 0; attempt < 80 && errorsNow().length < 2; attempt++) await sleep(500);
     assert.ok(errorsNow().length >= 2, `el servidor de TypeScript marcó ${errorsNow().length} errores`);
-    // An automatic check may be on its way at the same time: look until one of the two has an answer.
     const waitForEdit = async () => {
       for (let attempt = 0; attempt < 20 && !api.pendingEdit(); attempt++) {
         await api.checkEdits();
@@ -705,7 +640,6 @@ async function run() {
 
     const before = api.today().requests;
     const acceptedBefore = api.today().accepted;
-    // Switched off (as this suite's user has it): nothing is asked.
     await api.checkEdits();
     assert.equal(api.pendingEdit(), undefined);
     assert.equal(api.today().requests, before);
@@ -718,7 +652,6 @@ async function run() {
     assert.equal(api.today().requests, before + 1);
     assert.ok(api.logLines().some((line) => /corrección #\d+ typescript · líneas 2–5 · 2 errores .* 4 líneas propuestas/.test(line)), 'falta la línea de log');
 
-    // Discarded: the same code with the same errors is not asked about again.
     await vscode.commands.executeCommand('ghostline.dismissEdit');
     assert.equal(api.pendingEdit(), undefined);
     await api.checkEdits();
@@ -726,7 +659,6 @@ async function run() {
     assert.equal(api.pendingEdit(), undefined);
     assert.equal(api.today().requests, before + 1);
 
-    // The code changes (still wrong): a new proposal, and this time it is applied.
     const edit = new vscode.WorkspaceEdit();
     edit.replace(broken.uri, new vscode.Range(3, 6, 3, 15), 'return a + 0;');
     await vscode.workspace.applyEdit(edit);

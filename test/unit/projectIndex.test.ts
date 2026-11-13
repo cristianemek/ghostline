@@ -133,7 +133,6 @@ test('index: a project that fits is listed whole in path order, whatever file is
     ].join('\n'),
   );
   assert.deepEqual([whole.files, whole.declarations, whole.omitted], [4, 5, 0]);
-  // The same text from any file: that is what lets the prompt cache keep serving it.
   assert.equal(buildProjectIndex(files, 'api/core.go', 10_000).text, whole.text);
   assert.equal(buildProjectIndex([...files].reverse(), undefined, 10_000).text, whole.text);
 });
@@ -147,7 +146,6 @@ test('index: one that does not fit starts from the folder being edited and moves
   assert.ok(near.omitted >= 1 && near.text.length <= 150 + 40);
   const far = buildProjectIndex(files, 'widget/src/app.ts', 150);
   assert.ok(far.text.startsWith('// widget/src/chat.ts\n'), far.text);
-  // Children of the folder come before unrelated ones.
   const child = buildProjectIndex(files, 'api/core.go', 160);
   assert.ok(child.text.indexOf('// api/db/gen/models.go') > 0 && !child.text.includes('widget/'), child.text);
 });

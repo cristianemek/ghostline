@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import { DEFAULT_LIMITS } from '../../src/completion/promptBuilder';
 import { buildFixPrompt, diffLines, fixRegion, hunkPreview, parseFix } from '../../src/edit/fix';
 
-// The case that prompted this: a snippet left with its placeholders.
 const file = [
   'func (c *core) finishOrder(ctx context.Context, itemID pgtype.UUID, content json.RawMessage, cause error) {',
   '\tstatus := gen.OrderStatusCompleted',
@@ -22,14 +21,11 @@ const problems = [
 
 test('fix: the region is the statement the errors are in, closed where its brackets close', () => {
   assert.deepEqual(fixRegion(lineAt, file.length, problems, 3), { startLine: 3, endLine: 6 });
-  // The cursor a few lines away still counts; far away it does not.
   assert.deepEqual(fixRegion(lineAt, file.length, problems, 1), { startLine: 3, endLine: 6 });
   assert.equal(fixRegion(lineAt, file.length, [{ line: 40, message: 'x' }], 3), undefined);
   assert.equal(fixRegion(lineAt, file.length, [], 3), undefined);
-  // One line with its brackets balanced is its own region.
   const call = ['\trows, err := c.queries.ListOrderItems(ctx, orderID, nil)', '\tif err != nil {', '\t}'];
   assert.deepEqual(fixRegion((line) => call[line] as string, call.length, [{ line: 0, message: 'too many arguments' }], 0), { startLine: 0, endLine: 0 });
-  // Brackets inside strings and comments do not count.
   const text = ['\tlog("open ( never closed") // {', '\tnext()'];
   assert.deepEqual(fixRegion((line) => text[line] as string, text.length, [{ line: 0, message: 'x' }], 0), { startLine: 0, endLine: 0 });
 });
@@ -37,10 +33,8 @@ test('fix: the region is the statement the errors are in, closed where its brack
 test('fix: nothing when what would have to be rewritten is too long or cannot be cut out cleanly', () => {
   const long = ['func big() {', ...Array.from({ length: 30 }, (_, i) => `\tstep${i}()`), '}'];
   assert.equal(fixRegion((line) => long[line] as string, long.length, [{ line: 0, message: 'x' }], 0), undefined);
-  // A closer with nothing to close: the error is about code above the region.
   const stray = ['\t})', '\tnext()'];
   assert.equal(fixRegion((line) => stray[line] as string, stray.length, [{ line: 0, message: 'unexpected )' }], 0), undefined);
-  // Errors spread over more than a dozen lines.
   const spread = Array.from({ length: 20 }, (_, i) => `\tline${i}()`);
   const at = (line: number): string => spread[line] as string;
   assert.equal(fixRegion(at, spread.length, [{ line: 0, message: 'x' }, { line: 12, message: 'z' }], 6), undefined);
@@ -75,25 +69,21 @@ test('fix: the answer becomes the new lines of the region, or nothing when it is
   const original = file.slice(3, 7);
   const fixed = ['\tswitch {', '\tcase cause != nil:', '\t\tstatus = gen.OrderStatusFailed', '\t}'];
   assert.deepEqual(parseFix(fixed.join('\n'), original, 'go'), fixed);
-  // Wrapped in a fence or in the region tags, answered from the left margin, with trailing spaces.
   assert.deepEqual(parseFix('```go\n' + fixed.join('\n') + '\n```', original, 'go'), fixed);
   assert.deepEqual(parseFix('<region>\n' + fixed.join('\n') + '\n</region>', original, 'go'), fixed);
   assert.deepEqual(parseFix(fixed.map((line) => line.slice(1) + '  ').join('\n'), original, 'go'), fixed);
-  // The same code, "nothing to do", prose, a doubt, or far more than was there.
   assert.equal(parseFix(original.join('\n'), original, 'go'), undefined);
   assert.equal(parseFix('<none/>', original, 'go'), undefined);
   assert.equal(parseFix('I cannot tell what the switch should test for here.', original, 'go'), undefined);
   assert.equal(parseFix('\tswitch {\n\tcase ... no, wait — the status is set above', original, 'go'), undefined);
   assert.equal(parseFix(Array.from({ length: 30 }, (_, i) => `\tstep${i}()`).join('\n'), original, 'go'), undefined);
   assert.equal(parseFix('', original, 'go'), undefined);
-  // Seen with the real CLI: a rewrite that leaves a bracket open, and fragments of the line instead of the line.
   assert.equal(parseFix('\tswitch {\n\tcase cause != nil:', original, 'go'), undefined);
   const call = ['\trows, err := c.queries.ListOrderItems(ctx, orderID, nil)'];
   assert.equal(parseFix('ctx, orderID, nil)', call, 'go'), undefined);
   assert.equal(parseFix('ListOrderItems(ctx, orderID)', call, 'go'), undefined);
   assert.equal(parseFix('ld, err := c.queries.ListOrderItems(ctx, orderID)', call, 'go'), undefined);
   assert.deepEqual(parseFix('rows, err := c.queries.ListOrderItems(ctx, orderID)', call, 'go'), ['\trows, err := c.queries.ListOrderItems(ctx, orderID)']);
-  // A typo at the very start of the line can still be corrected.
   assert.deepEqual(parseFix('\treturn total', ['\tretrun total'], 'go'), ['\treturn total']);
 });
 
@@ -104,14 +94,11 @@ test('fix: the stretches that change, and how each one is shown', () => {
   assert.deepEqual(hunks, [{ oldStart: 0, oldCount: 3, newLines: ['\tswitch {', '\tcase cause != nil:', '\t\tstatus = gen.OrderStatusFailed'] }]);
   assert.equal(hunkPreview(hunks[0] as (typeof hunks)[number]), 'switch { ⏎ case cause != nil: ⏎ status = gen.OrderStatusFailed');
 
-  // One line of several changes: only that one.
   assert.deepEqual(diffLines(['a()', 'b(x, y, nil)', 'c()'], ['a()', 'b(x, y)', 'c()']), [{ oldStart: 1, oldCount: 1, newLines: ['b(x, y)'] }]);
-  // Lines only added, lines only removed.
   assert.deepEqual(diffLines(['a()', 'c()'], ['a()', 'b()', 'c()']), [{ oldStart: 1, oldCount: 0, newLines: ['b()'] }]);
   const removal = diffLines(['a()', 'b()', 'c()'], ['a()', 'c()']);
   assert.deepEqual(removal, [{ oldStart: 1, oldCount: 1, newLines: [] }]);
   assert.equal(hunkPreview(removal[0] as (typeof removal)[number]), 'se elimina');
   assert.deepEqual(diffLines(['same'], ['same']), []);
-  // A long replacement is cut short in the preview; the hover has all of it.
   assert.ok(hunkPreview({ oldStart: 0, oldCount: 1, newLines: ['x'.repeat(400)] }).length <= 160);
 });

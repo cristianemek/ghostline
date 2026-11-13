@@ -1,14 +1,3 @@
-// Typing simulation against the REAL Claude Code CLI (spends a few dozen Haiku requests).
-// Runs inside the extension host: `npm run bench:typing`.
-//
-// For each of a handful of real lines of code, the line is removed from the file and "typed" again
-// key by key with a human-like rhythm: a short hesitation on the empty line, ~95 ms per key inside a
-// word, ~230 ms after a space or punctuation. The typist stops part of the way through the line.
-// What is measured is what the user feels: the time from that last keystroke until a suggestion is
-// on screen, and what it cost (requests and input tokens for the whole line).
-//
-// Every line is typed once per `ghostline.speculation` level: "off" is the original behaviour (350 ms
-// wait everywhere, the next keystroke kills the request in the air).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -20,7 +9,6 @@ const HESITATION_MS = 420;
 const KEY_MS = 95;
 const BOUNDARY_MS = 230;
 const GIVE_UP_MS = 6000;
-/** ghostline.speculation levels; "off" is the original behaviour. */
 const MODES = (process.env.GHOSTLINE_TYPING_MODES || 'off,line').split(',');
 
 function pickLines(lines, count) {
@@ -35,7 +23,6 @@ function pickLines(lines, count) {
   return usable.filter((_, i) => i % step === 0).slice(0, count);
 }
 
-/** Where the typist stops: the first boundary at or after a third of the line. */
 function stopIndex(content) {
   for (let i = Math.floor(content.length * 0.33); i < content.length - 4; i++) {
     if (/[ .(=,]/.test(content[i])) return i + 1;
@@ -59,7 +46,6 @@ async function run() {
     const edit = new vscode.WorkspaceEdit();
     edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), text);
     await vscode.workspace.applyEdit(edit);
-    // Park the real cursor where the editor never asks for suggestions on its own.
     editor.selection = new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 0));
     await vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
   };
@@ -73,7 +59,7 @@ async function run() {
     api.provider.clearCache();
     api.provider.dismiss();
     await settings.update('speculation', mode, vscode.ConfigurationTarget.Global);
-    await sleep(1500); // let a standby process warm up, as it would between two lines of real typing
+    await sleep(1500);
 
     const before = api.today();
     let source = null;
@@ -89,7 +75,6 @@ async function run() {
       return call;
     };
 
-    // The cursor lands on the empty line and the typist hesitates before the first key.
     let last = ask();
     await sleep(HESITATION_MS);
     for (let i = 0; i < typed.length; i++) {
@@ -103,7 +88,7 @@ async function run() {
     const stoppedAt = Date.now();
     const items = await Promise.race([last, sleep(GIVE_UP_MS).then(() => undefined)]);
     const latency = Date.now() - stoppedAt;
-    await sleep(900); // let anything still in the air land so its tokens are counted
+    await sleep(900);
     const after = api.today();
     source?.cancel();
 

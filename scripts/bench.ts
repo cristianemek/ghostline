@@ -1,11 +1,3 @@
-// Measures ghostline against the REAL Claude Code CLI (it spends a few thousand tokens).
-// It replays "the user is about to type this line" on this repository's own sources, through the same
-// pool, prompt builder and post-processor the extension uses.
-//
-//   npm run bench -- [--n 12] [--mode single-use|persistent] [--model haiku] [--effort low]
-//                    [--gap 1200] [--cache on|off] [--verbose]
-//                    [--style]     learn this repo's style profile first and send it with every request
-//                    [--examples]  feed back each original line as an accepted example (few-shot)
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
@@ -35,13 +27,10 @@ const cache = option('cache', mode === 'persistent' ? 'on' : 'off') === 'on';
 const verbose = process.argv.includes('--verbose');
 const withStyle = process.argv.includes('--style');
 const withExamples = process.argv.includes('--examples');
-// --env KEY=VALUE (repeatable): extra environment for the CLI processes, to compare configurations.
 const extraEnv = Object.fromEntries(
   process.argv.flatMap((arg, index) => (arg === '--env' ? [(process.argv[index + 1] ?? '').split('=', 2) as [string, string]] : [])),
 );
-// --arg VALUE (repeatable): extra CLI arguments appended to the standard ones.
 const extraArgs = process.argv.flatMap((arg, index) => (arg === '--arg' ? [process.argv[index + 1] ?? ''] : []));
-// Absolute: the CLI runs in its own working folder, not here.
 const systemPromptFile = resolve(option('system', join('resources', 'system-prompt.txt')));
 const TARGET_TOTAL = 1900;
 
@@ -53,7 +42,6 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/** Small deterministic generator so runs are comparable. */
 function lcg(seed: number): () => number {
   let state = seed;
   return () => {
@@ -91,7 +79,6 @@ function makeSamples(total: number): Sample[] {
     if (samples.length % 2 === 0) {
       samples.push({ path: file.path, kind: 'línea nueva', prefix: before + indent, suffix: after, expected: content });
     } else {
-      // Cut after an early token boundary: "const x = ", "foo(", "this.".
       const cut = /[=(.]\s?/.exec(content.slice(4));
       if (!cut) continue;
       const at = 4 + cut.index + cut[0].length;
@@ -107,7 +94,6 @@ function makeSamples(total: number): Sample[] {
   return samples;
 }
 
-/** Same flow as the "Aprender estilo del proyecto" command, without the UI. */
 async function learnStyle(command: string, cwd: string): Promise<string> {
   const root = process.cwd();
   const candidates = sourceFiles(join(root, 'src')).map((path) => ({
@@ -139,11 +125,6 @@ async function learnStyle(command: string, cwd: string): Promise<string> {
 const GRADES = ['idéntica', 'casi', 'distinta', 'vacía'] as const;
 type Grade = (typeof GRADES)[number];
 
-/**
- * How close the first suggested line is to the line that was really there:
- * identical; "casi" = it starts the same way for most of the line, or it is the right line cut short
- * (what a user would accept and finish by hand); different; or nothing suggested.
- */
 function gradeOf(got: string, expected: string): Grade {
   if (!got) return 'vacía';
   if (got === expected) return 'idéntica';
@@ -235,7 +216,6 @@ async function main(): Promise<void> {
       shouldStop: (text) => shouldStopEarly(text, { maxLines: 6, prefix: built.prefix, languageId: 'typescript' }),
     });
     if (built.examplesUsed > 0) requestsWithExamples++;
-    // As if the user had accepted the right completion here: it becomes an example for later requests.
     if (withExamples) examples.add('typescript', sample.prefix.split('\n').slice(-6).join('\n'), sample.expected);
     const label = `#${String(index + 1).padStart(2)} ${sample.kind.padEnd(14)}${built.examplesUsed > 0 ? ` +${built.examplesUsed}ej` : '    '}`;
     if (outcome.status !== 'ok') {
@@ -305,9 +285,7 @@ async function main(): Promise<void> {
   await sleep(1500);
   try {
     rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  } catch {
-    // The temp folder is cleaned up by the extension on its next start.
-  }
+  } catch {}
 }
 
 void main();

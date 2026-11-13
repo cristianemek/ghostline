@@ -5,6 +5,7 @@ export default tseslint.config(
   { ignores: ['dist/**', 'out/**', 'node_modules/**', '.vscode-test/**', '*.vsix'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  { rules: { 'no-empty': ['error', { allowEmptyCatch: true }] } },
   {
     files: ['**/*.ts'],
     languageOptions: { parserOptions: { tsconfigRootDir: import.meta.dirname } },
@@ -16,7 +17,6 @@ export default tseslint.config(
     },
   },
   {
-    // Plain Node scripts (build script, fake CLI used by the integration tests).
     files: ['**/*.mjs', '**/*.js'],
     languageOptions: {
       globals: {

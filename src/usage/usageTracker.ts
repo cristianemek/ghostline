@@ -1,38 +1,27 @@
 import { totalInputTokens, type Usage } from '../cli/streamParser';
 
-/** The slice of `vscode.Memento` this module needs; a plain object works in tests. */
 export interface KeyValueStore {
   get<T>(key: string): T | undefined;
   update(key: string, value: unknown): Thenable<void> | void;
 }
 
 export interface DayStats {
-  /** Local date, YYYY-MM-DD. */
   date: string;
-  /** Requests that reached the CLI (including cancelled ones and errors). */
   requests: number;
   inputTokens: number;
   outputTokens: number;
   thinkingTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
-  /** What the same usage would cost on the API, as reported by the CLI. Informational. */
   costUsd: number;
   shown: number;
   accepted: number;
   errors: number;
   timeouts: number;
   cancelled: number;
-  /** Suggestions served without a request: cache hits and typeahead. */
   localHits: number;
-  /**
-   * Estimated input tokens of requests that were cut off after being sent but before the model
-   * answered. The CLI reports no usage for them, so whether they were billed is unknown.
-   */
   unconfirmedTokens: number;
-  /** Total latency of each successful request, in ms. Kept only for recent days. */
   latencies: number[];
-  /** Total input tokens of each successful request, for the median. */
   inputSamples: number[];
   p50?: number;
   p95?: number;
@@ -46,23 +35,13 @@ export interface RequestRecord {
   usage: Usage;
   costUsd: number;
   totalMs: number;
-  /**
-   * False for requests that are not completions (learning the project's style): their tokens count,
-   * but their latency and size would distort the completion statistics.
-   */
   sample?: boolean;
 }
 
 const STORE_KEY = 'ghostline.usage.v1';
-/**
- * What ghostline has spent, in API-equivalent dollars, by quarter of an hour: [start of the quarter
- * in ms, dollars]. The days above follow the local calendar; a Claude session starts whenever it
- * starts, so its share needs spend by time.
- */
 const SPEND_KEY = 'ghostline.spend.v1';
 const SPEND_BUCKET_MS = 15 * 60_000;
 const SPEND_KEEP_MS = 8 * 24 * 3600_000;
-/** A typical completion with the default model (≈1.900 input tokens), for pricing a cut-off request before any has been measured. */
 const FALLBACK_USD_PER_INPUT_TOKEN = 0.0045 / 1900;
 const KEEP_DAYS = 30;
 const MAX_SAMPLES_PER_DAY = 400;
@@ -110,7 +89,6 @@ export function localDate(time: Date): string {
   return `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}`;
 }
 
-/** Nearest-rank percentile; undefined for an empty list. */
 export function percentile(values: readonly number[], p: number): number | undefined {
   if (values.length === 0) return undefined;
   const sorted = [...values].sort((a, b) => a - b);
@@ -153,12 +131,6 @@ function sanitizeDay(raw: unknown): DayStats | null {
   return day;
 }
 
-/**
- * Per-day usage counters persisted in the extension's global state (30 days).
- *
- * Several VS Code windows share that state, so each window only remembers what it has not written
- * yet (`pending`) and adds it to whatever is stored when flushing, instead of overwriting.
- */
 export class UsageTracker {
   private stored = new Map<string, DayStats>();
   private pending = new Map<string, DayStats>();
@@ -203,11 +175,8 @@ export class UsageTracker {
     this.dirty = true;
   }
 
-  /** A request that reached the API but was cut off before any usage was reported. */
   recordUnconfirmed(estimatedInputTokens: number): void {
     const tokens = Math.max(0, Math.round(estimatedInputTokens));
-    // Priced as if it had been billed, at what today's confirmed requests cost per input token: the
-    // share of Claude's limit shown to the user must not come out lower than the real one.
     const day = this.today();
     const measuredTokens = day.inputTokens + day.cacheReadTokens + day.cacheWriteTokens;
     const usdPerToken = day.costUsd > 0 && measuredTokens > 0 ? day.costUsd / measuredTokens : FALLBACK_USD_PER_INPUT_TOKEN;
@@ -216,10 +185,6 @@ export class UsageTracker {
     this.dirty = true;
   }
 
-  /**
-   * API-equivalent dollars spent since `sinceMs`, cut-off requests included at their estimate. Counts
-   * whole quarters of an hour, so it can only err on the high side.
-   */
   spentSince(sinceMs: number): number {
     let total = 0;
     for (const spend of [this.storedSpend, this.pendingSpend]) {
@@ -235,12 +200,10 @@ export class UsageTracker {
     this.dirty = true;
   }
 
-  /** Today's totals: what is stored plus what this window has not flushed yet. */
   today(): DayStats {
     return this.day(localDate(this.now()));
   }
 
-  /** Most recent first, always `count` entries (empty days included). */
   lastDays(count: number): DayStats[] {
     const days: DayStats[] = [];
     const cursor = this.now();
@@ -260,12 +223,10 @@ export class UsageTracker {
     return day.inputSamples.length > 0 ? percentile(day.inputSamples, 50) : day.medianInput;
   }
 
-  /** True once today's requests reach the limit (0 = no limit). */
   overDailyLimit(limit: number): boolean {
     return limit > 0 && this.today().requests >= limit;
   }
 
-  /** Writes pending counters on top of whatever any window has stored since the last flush. */
   async flush(): Promise<void> {
     if (!this.dirty) {
       this.reload();
@@ -351,7 +312,6 @@ function mergeDay(base: DayStats, delta: DayStats): DayStats {
   return merged;
 }
 
-/** Past days keep their percentiles but not the raw samples. */
 function compactDay(day: DayStats): DayStats {
   if (day.latencies.length === 0 && day.inputSamples.length === 0) return day;
   return {

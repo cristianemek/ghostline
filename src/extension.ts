@@ -44,33 +44,25 @@ import { TokenEstimator } from './usage/tokenEstimator';
 import { UsageTracker, type DayStats } from './usage/usageTracker';
 
 const CALIBRATION_KEY = 'ghostline.calibration.v1';
-/** Inside the extension's global storage: where the CLI's working folders are created. */
 const WORK_FOLDERS = 'cli';
 const LEGACY_CWD_PREFIX = 'ghostline-cwd-';
 const STANDBY_MAX_IDLE_MS = 10 * 60_000;
 const FLUSH_INTERVAL_MS = 15_000;
 const CLI_RETRY_MS = 30_000;
 const SPEED_WARNING_KEY = 'ghostline.speedWarning.v1';
-/** The API key source the user has been told about: billing by use is said once, not at every start. */
 const API_KEY_NOTICE_KEY = 'ghostline.apiKeyNotice.v1';
-/** The server other than Anthropic's that the user has said is theirs. */
 const ENDPOINT_ACK_KEY = 'ghostline.endpointAck.v1';
-/** Successful requests needed before today's median latency is worth acting on. */
 const MIN_REQUESTS_FOR_SPEED_WARNING = 20;
 
-/** What `activate` returns when the extension host runs the end-to-end suite. */
 export interface GhostlineTestApi {
   provider: GhostlineProvider;
   today(): DayStats;
   statusText(): string;
   logLines(): string[];
   exampleCount(): number;
-  /** Decides now about the accepted suggestions still waiting to become examples. */
   confirmExamples(): void;
   recent(): RecentEntry[];
-  /** The system prompt the CLI is started with right now, after bringing the project index up to date. */
   systemPrompt(): Promise<string>;
-  /** Looks for something to correct next to the cursor now, without waiting for the idle time. */
   checkEdits(): Promise<void>;
   pendingEdit(): Proposal | undefined;
   adaptiveReport(): ContextReport[];
@@ -93,18 +85,14 @@ class Ghostline implements vscode.Disposable {
   private readonly learning: Learning;
   private readonly indexer: ProjectIndexer;
   private readonly edits: EditSuggester;
-  /** The system prompt the CLI processes are started with: the bundled one, or a copy with the project index. */
   private systemPromptFile = '';
-  /** What that file was built from, to tell when it has to be written again. */
   private systemPromptSource = '';
-  /** Characters the project index adds to the system prompt. */
   private projectChars = 0;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly excludedCache = new Map<string, boolean>();
   private readonly warnedKeySources = new Set<string>();
   private readonly shownTroubles = new Set<string>();
   private refreshes = 0;
-  /** Where the CLI runs: an empty folder of ghostline's own (see cli/workFolder.ts). */
   private cwd: string;
   private readonly flushTimer: NodeJS.Timeout;
   private config: GhostlineConfig = readConfig();
@@ -121,7 +109,6 @@ class Ghostline implements vscode.Disposable {
     this.usage = new UsageTracker(context.globalState);
     this.estimator = new TokenEstimator(context.globalState.get(CALIBRATION_KEY));
     this.cwd = createWorkFolder(path.join(context.globalStorageUri.fsPath, WORK_FOLDERS));
-    // Everything ghostline learns stays in the editor's local storage.
     this.examples = new ExampleStore(context.workspaceState);
     this.recent = new RecentSuggestions(context.workspaceState);
     this.indexer = new ProjectIndexer({ isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns) });
@@ -163,8 +150,6 @@ class Ghostline implements vscode.Disposable {
       onActivity: () => this.queueRender(),
       onTrouble: (message, pauseMs) => this.onTrouble(message, pauseMs),
       refresh: (documentKey) => {
-        // An answer landed after the user had typed on. The inline suggestions API has no "update":
-        // asking the editor to trigger again is how the provider gets to show it now.
         this.refreshes++;
         if (vscode.window.activeTextEditor?.document.uri.toString() !== documentKey) return;
         void vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
@@ -172,7 +157,6 @@ class Ghostline implements vscode.Disposable {
       learning: this.learning,
       journal: this.recent,
       projectContextChars: () => this.projectChars,
-      // Unless "ghostline.context.symbols" is off.
       symbols: createSymbolProvider({
         isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns),
         charsPerToken: () => this.estimator.charsPerToken,
@@ -221,7 +205,6 @@ class Ghostline implements vscode.Disposable {
       vscode.languages.onDidChangeDiagnostics((event) => this.edits.diagnosticsChanged(event.uris)),
       vscode.window.onDidChangeActiveTextEditor(() => this.edits.editorChanged()),
       vscode.workspace.onDidSaveTextDocument((document) => this.style.onSaved(document)),
-      // The project index follows the files: what a saved file declares, and files that come and go.
       vscode.workspace.onDidSaveTextDocument((document) => this.indexFile(document.uri)),
       vscode.workspace.onDidCreateFiles((event) => event.files.forEach((uri) => this.indexFile(uri))),
       vscode.workspace.onDidDeleteFiles((event) => {
@@ -249,7 +232,6 @@ class Ghostline implements vscode.Disposable {
     this.flushTimer.unref();
     setTimeout(() => this.removeStaleCwds(), 5000).unref();
     this.refreshProjectContext();
-    // The first look at the whole project waits for the editor to finish starting.
     setTimeout(() => this.scanProject(), 1500).unref();
     this.render();
     this.log(`ghostline activo · carpeta de trabajo de la CLI: ${this.cwd}`);
@@ -266,9 +248,7 @@ class Ghostline implements vscode.Disposable {
     this.channel.dispose();
     try {
       fs.rmdirSync(this.cwd);
-    } catch {
-      // A CLI process that is still exiting keeps the folder busy; the next start cleans it up.
-    }
+    } catch {}
   }
 
   async flush(): Promise<void> {
@@ -277,8 +257,6 @@ class Ghostline implements vscode.Disposable {
     this.maybeWarnSlow();
     this.queueRender();
   }
-
-  // --- CLI processes -------------------------------------------------------------------------
 
   private getPool(): WorkerPool | null {
     if (this.pool) return this.pool;
@@ -300,8 +278,6 @@ class Ghostline implements vscode.Disposable {
     }
     this.cliError = undefined;
     const { config } = this;
-    // Say it before the first request is billed, not after: with one of these variables set the CLI
-    // authenticates with a key, and each suggestion is billed by use.
     for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) {
       if (process.env[name]) this.noteApiKey(name);
     }
@@ -309,8 +285,6 @@ class Ghostline implements vscode.Disposable {
     try {
       ensureEmptyWorkFolder(this.cwd);
     } catch (error) {
-      // Something put files where the CLI runs, and the CLI obeys settings it finds there. It is
-      // never launched in that folder: a new one is made, and the user is told.
       const detail = error instanceof Error ? error.message : String(error);
       this.cwd = createWorkFolder(path.join(this.context.globalStorageUri.fsPath, WORK_FOLDERS));
       this.log(`AVISO: ${detail}. Se usa una carpeta nueva: ${this.cwd}`);
@@ -350,7 +324,6 @@ class Ghostline implements vscode.Disposable {
     return this.pool;
   }
 
-  /** How to start the CLI for one-off requests (the style profile). */
   private launcher(): Launcher {
     const testCli = this.testCli();
     if (testCli) return testCli;
@@ -358,10 +331,6 @@ class Ghostline implements vscode.Disposable {
     return resolved.ok ? { command: resolved.command, prefixArgs: [] } : { error: resolved.message };
   }
 
-  /**
-   * Test runs only (extension host started with --extensionTestsPath): lets the end-to-end suite
-   * point ghostline at the fake CLI. Ignored in normal use.
-   */
   private testCli(): { command: string; prefixArgs: string[] } | undefined {
     if (this.context.extensionMode !== vscode.ExtensionMode.Test) return undefined;
     const raw = process.env.GHOSTLINE_TEST_CLI;
@@ -376,7 +345,6 @@ class Ghostline implements vscode.Disposable {
     }
   }
 
-  /** Handles for the end-to-end suite. */
   testApi(): GhostlineTestApi {
     return {
       provider: this.provider,
@@ -416,8 +384,6 @@ class Ghostline implements vscode.Disposable {
     this.init = undefined;
   }
 
-  // --- Project index ------------------------------------------------------------------------
-
   private scanProject(): void {
     if (!this.config.enabled || !this.config.symbolContext) return;
     void this.indexer.scan().then(
@@ -433,12 +399,6 @@ class Ghostline implements vscode.Disposable {
     });
   }
 
-  /**
-   * Decides which system prompt the CLI is started with: the bundled one or, when there is a project
-   * index, a copy of it with the index at the end. A new one means new processes: the ones already
-   * running were started with the old text. Called whenever the index, the file being edited or
-   * the settings may have changed; it does nothing unless the result is different.
-   */
   private refreshProjectContext(): void {
     const { config } = this;
     const bundled = this.context.asAbsolutePath(
@@ -487,10 +447,6 @@ class Ghostline implements vscode.Disposable {
     this.queueRender();
   }
 
-  /**
-   * With an API key every suggestion is billed by use. That is worth knowing before the first one,
-   * and worth saying once: until the user has read it.
-   */
   private noteApiKey(source: string): void {
     if (this.warnedKeySources.has(source)) return;
     this.warnedKeySources.add(source);
@@ -509,11 +465,6 @@ class Ghostline implements vscode.Disposable {
       });
   }
 
-  /**
-   * With ANTHROPIC_BASE_URL in the editor's environment the CLI sends every request, and the login
-   * that goes with it, to that server instead of Anthropic's. Legitimate behind a company gateway;
-   * otherwise it is how a session gets stolen. Said once per server, until the user confirms it.
-   */
   private warnAboutEndpoint(): void {
     const host = endpointOverride(process.env);
     if (!host || this.context.globalState.get<string>(ENDPOINT_ACK_KEY) === host) return;
@@ -534,23 +485,18 @@ class Ghostline implements vscode.Disposable {
       });
   }
 
-  // --- Events --------------------------------------------------------------------------------
-
   private onConfigChange(event: vscode.ConfigurationChangeEvent): void {
     if (!affectsGhostline(event)) return;
     this.config = readConfig();
     this.excludedCache.clear();
-    // Cached suggestions were produced under the old settings (line limit, exclusions, model…).
     this.provider.clearCache();
     if (affectsPool(event) || !this.config.enabled) this.resetPool();
-    // Exclusions, the reasoning mode and the switch itself all change what the index may hold.
     if (this.config.symbolContext) this.scanProject();
     this.refreshProjectContext();
     this.warnAboutPatterns();
     this.queueRender();
   }
 
-  /** An exclusion pattern that cannot be evaluated protects nothing: say so instead of ignoring it. */
   private warnAboutPatterns(): void {
     const unusable = unusablePatterns(this.config.excludePatterns);
     if (unusable.length === 0) return;
@@ -561,7 +507,6 @@ class Ghostline implements vscode.Disposable {
     );
   }
 
-  /** Automatic requests were paused after repeated failures: explain why, once per reason. */
   private onTrouble(message: string, pauseMs: number): void {
     const seconds = Math.round(pauseMs / 1000);
     this.log(`sugerencias automáticas en pausa ${seconds} s tras errores repetidos: ${message}`);
@@ -578,17 +523,14 @@ class Ghostline implements vscode.Disposable {
         });
     }
     this.queueRender();
-    // Refresh the status bar when the pause is over.
     setTimeout(() => this.queueRender(), pauseMs + 200).unref();
   }
 
   private onDocumentChange(event: vscode.TextDocumentChangeEvent): void {
-    // Any change to the text, undo and redo included, makes a correction on screen stale.
     if (event.contentChanges.length > 0) this.edits.documentChanged(event.document);
     if (event.contentChanges.length === 0 || event.reason !== undefined) return;
     if (event.document !== vscode.window.activeTextEditor?.document) return;
     this.provider.noteKeystroke(event.document.uri.toString(), typedInsertionEnd(event.contentChanges));
-    // Typing is the best predictor of a request: make sure a process is warming up.
     if (!this.config.enabled || this.paused) return;
     const { scheme } = event.document.uri;
     if (scheme !== 'file' && scheme !== 'untitled') return;
@@ -596,7 +538,6 @@ class Ghostline implements vscode.Disposable {
     this.getPool()?.warm();
   }
 
-  /** Sensitive files: checked with VS Code's own matcher and with ours; either one excludes. */
   private isExcluded(document: vscode.TextDocument): boolean {
     const key = document.uri.toString();
     const known = this.excludedCache.get(key);
@@ -616,8 +557,6 @@ class Ghostline implements vscode.Disposable {
     this.excludedCache.set(key, excluded);
     return excluded;
   }
-
-  // --- Commands ------------------------------------------------------------------------------
 
   private togglePause(): void {
     this.paused = !this.paused;
@@ -654,16 +593,12 @@ class Ghostline implements vscode.Disposable {
     this.render();
   }
 
-  /** The last answers in this workspace, to look back at how the suggestions are doing. */
   private async showRecent(): Promise<void> {
     const document = await vscode.workspace.openTextDocument({ content: formatRecent(this.recent.list()), language: 'plaintext' });
     await vscode.window.showTextDocument(document, { preview: true });
   }
 
-  /** When the median latency is above 1.5 s, say so once a day and offer the two ways out. */
   private maybeWarnSlow(): void {
-    // Only where speed is what was asked for. With `reasoning: adaptive` the model stops to think
-    // on purpose (2–3 s), and the remedies this offers would not change that.
     if (this.config.reasoning !== 'minimal') return;
     const day = this.usage.today();
     if (day.latencies.length < MIN_REQUESTS_FOR_SPEED_WARNING) return;
@@ -743,8 +678,6 @@ class Ghostline implements vscode.Disposable {
     });
   }
 
-  // --- Status bar ----------------------------------------------------------------------------
-
   private queueRender(): void {
     if (this.renderQueued) return;
     this.renderQueued = true;
@@ -781,10 +714,8 @@ class Ghostline implements vscode.Disposable {
         .map((entry) => `${entry.languageId} ${CONTEXT_LABELS[entry.context]}`),
     };
     this.statusBar.text = statusText(day, session);
-    // The ghost is a picture: a screen reader gets the name instead.
     this.statusBar.accessibilityInformation = { label: plainStatus(this.statusBar.text) };
     const tooltip = new vscode.MarkdownString(tooltipMarkdown(day, session), true);
-    // Colours for the meters, and links that can run ghostline's own commands and nothing else.
     tooltip.supportHtml = true;
     tooltip.isTrusted = { enabledCommands: TOOLTIP_COMMANDS };
     this.statusBar.tooltip = tooltip;
@@ -795,7 +726,6 @@ class Ghostline implements vscode.Disposable {
         : undefined;
   }
 
-  /** Removes working folders left behind by earlier sessions, here and where early versions kept them. */
   private removeStaleCwds(): void {
     const day = 24 * 3600_000;
     removeStaleWorkFolders(path.join(this.context.globalStorageUri.fsPath, WORK_FOLDERS), WORK_FOLDER_PREFIX, this.cwd, day);

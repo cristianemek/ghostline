@@ -10,13 +10,10 @@ import { buildFixPrompt, diffLines, fixRegion, hunkPreview, parseFix, type FixRe
 
 export interface EditDeps {
   getConfig(): GhostlineConfig;
-  /** Null when the CLI cannot be located. */
   getPool(): WorkerPool | null;
   isPaused(): boolean;
   isExcluded(document: vscode.TextDocument): boolean;
-  /** An inline suggestion is on screen or on its way: a correction would compete with it. */
   completionBusy(): boolean;
-  /** Line and time of the user's last hand-typed insertion in this document. */
   lastTyped(document: vscode.TextDocument): { line: number; at: number } | undefined;
   usage: UsageTracker;
   estimator: TokenEstimator;
@@ -25,7 +22,6 @@ export interface EditDeps {
   journal?: { add(entry: RecentEntry): void; resolve(id: number, outcome: string): void };
 }
 
-/** What is on screen waiting for Tab or Esc. */
 export interface Proposal {
   id: number;
   documentKey: string;
@@ -34,23 +30,12 @@ export interface Proposal {
   newLines: string[];
 }
 
-/** No typing, no cursor movement and no new diagnostics for this long before a correction is asked for. */
 const IDLE_MS = 1500;
-/** Code typed by hand this recently is still being written, errors and all. */
 const RECENT_TYPING_MS = 6000;
-/** A correction for the same code and the same errors is asked for once. */
 const MAX_REMEMBERED = 100;
 const CONTEXT_KEY = 'ghostline.editVisible';
-/** Kept apart from the completion requests' numbers in the journal. */
 const FIRST_ID = 100_000;
 
-/**
- * Corrections: when the compiler marks errors in code next to the cursor that is not being typed
- * right now (a snippet with placeholders, a call with one argument too many), asks the model for
- * that block rewritten and offers it in place: what would go is struck through, what would come is
- * shown after it, Tab applies it and Esc discards it. The editor's stable API cannot show a
- * replacement as ghost text, only insertions, hence a view of its own.
- */
 export class EditSuggester {
   private readonly removed = vscode.window.createTextEditorDecorationType({
     textDecoration: 'line-through',
@@ -80,7 +65,6 @@ export class EditSuggester {
     return { id, documentKey, documentVersion, region, newLines };
   }
 
-  /** Something changed (typing, the cursor, the diagnostics): look again once things are quiet. */
   schedule(delayMs: number = IDLE_MS): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
@@ -116,7 +100,6 @@ export class EditSuggester {
     this.schedule();
   }
 
-  /** Applies the correction on screen. False when there is none or the code has changed under it. */
   async accept(): Promise<boolean> {
     const shown = this.current;
     if (!shown) return false;
@@ -126,7 +109,6 @@ export class EditSuggester {
       this.dismiss('el código cambió');
       return false;
     }
-    // Cleared first: the edit below must not be taken for the user typing over the proposal.
     this.clear();
     const range = new vscode.Range(region.startLine, 0, region.endLine, document.lineAt(region.endLine).text.length);
     const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
@@ -159,7 +141,6 @@ export class EditSuggester {
     this.added.dispose();
   }
 
-  /** Looks at the code next to the cursor now; asks for a correction if there is something to correct. */
   async check(): Promise<void> {
     const { deps } = this;
     const config = deps.getConfig();
@@ -181,7 +162,6 @@ export class EditSuggester {
     const region = fixRegion((line) => document.lineAt(line).text, document.lineCount, problems, editor.selection.active.line);
     if (!region) return;
 
-    // Code the user is in the middle of typing is full of errors that are not mistakes.
     const typed = deps.lastTyped(document);
     if (typed && typed.line >= region.startLine && typed.line <= region.endLine) {
       const since = Date.now() - typed.at;
@@ -231,7 +211,6 @@ export class EditSuggester {
       const outcome = await pool.request(prompt.text, {
         signal: controller.signal,
         timeoutMs: config.requestTimeoutMs,
-        // A correction is a few lines; anything much longer is the model rewriting the file.
         shouldStop: (text) => text.split('\n').length > oldLines.length + 14,
       });
       deps.usage.recordRequest({ status: outcome.status, usage: outcome.usage, costUsd: outcome.costUsd, totalMs: outcome.totalMs, sample: false });
@@ -295,7 +274,6 @@ export class EditSuggester {
     this.deps.usage.recordShown();
   }
 
-  /** The new text of a stretch, shown after the last line it replaces (or after the line it follows, when it only adds). */
   private addedAfter(document: vscode.TextDocument, region: FixRegion, hunk: Hunk, hover: vscode.MarkdownString): vscode.DecorationOptions {
     const anchor = Math.max(0, region.startLine + hunk.oldStart + Math.max(hunk.oldCount, 0) - 1);
     const end = document.lineAt(Math.min(anchor, document.lineCount - 1)).range.end;

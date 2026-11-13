@@ -21,14 +21,12 @@ export interface WorkerSpawnOptions {
 export interface WorkerEvents {
   onInit?(info: InitInfo): void;
   onRateLimit?(info: RateLimitInfo): void;
-  /** The process is gone, whatever the reason (retired, killed, crashed, failed to start). */
   onExit?(worker: CliWorker, detail: string): void;
 }
 
 export interface TurnOptions {
   timeoutMs: number;
   signal?: AbortSignal;
-  /** Called after every text delta; returning true kills the process and keeps the text so far. */
   shouldStop?(textSoFar: string): boolean;
 }
 
@@ -39,13 +37,11 @@ export interface TurnResult {
   text: string;
   errorMessage?: string;
   usage: Usage;
-  /** True when the turn was cut short: usage comes from `message_start` plus an output estimate. */
   usagePartial: boolean;
   costUsd: number;
   firstTokenMs: number | null;
   totalMs: number;
   apiMs: number | null;
-  /** API round trips the CLI made for this message; more than one means it retried on its own. */
   numTurns: number;
   stoppedEarly: boolean;
 }
@@ -64,10 +60,6 @@ interface TurnState {
 
 const STDERR_TAIL_CHARS = 2000;
 
-/**
- * What the CLI prints on failure ends up in ghostline's log, which people paste into bug reports.
- * Anything in it that looks like a key or a session token is blanked out first.
- */
 export function redactSecrets(text: string): string {
   return text
     .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, 'sk-***')
@@ -76,21 +68,14 @@ export function redactSecrets(text: string): string {
     .replace(/((?:api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|authorization|x-api-key|password|secret)["']?\s*[:=]\s*["']?)[^\s"',;]{6,}/gi, '$1***')
     .replace(/(\/\/)[^/\s:@]+:[^/\s@]+@/g, '$1***@');
 }
-/** Rough output-token estimate for turns that never reached `result`. */
 const OUTPUT_CHARS_PER_TOKEN = 3;
 
-/**
- * One `claude -p` process speaking stream-json on stdin/stdout.
- * The CLI prints nothing until it receives input, so a worker has no observable "ready" state:
- * it can be written to right after spawning and simply answers sooner the older it is.
- */
 export class CliWorker {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly parser: NdjsonParser;
   private readonly spawnedAt = performance.now();
   private turn: TurnState | null = null;
   private exited = false;
-  /** Set as soon as we ask the process to go away; the exit itself arrives later. */
   private stopping = false;
   private stderrTail = '';
   private retireTimer: NodeJS.Timeout | null = null;
@@ -101,9 +86,7 @@ export class CliWorker {
     private readonly events: WorkerEvents = {},
   ) {
     this.parser = new NdjsonParser((obj) => this.handleMessage(obj));
-    // Throws, and nothing is launched, unless the working folder is empty (see workFolder.ts).
     ensureEmptyWorkFolder(options.cwd);
-    // shell: false always. Arguments reach the CLI verbatim, including the empty string of `--tools ""`.
     this.child = spawn(options.command, options.args, {
       cwd: options.cwd,
       env: options.env,
@@ -115,7 +98,6 @@ export class CliWorker {
     this.child.stderr.on('data', (chunk: Buffer) => {
       this.stderrTail = (this.stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);
     });
-    // Writing to a process that already died raises EPIPE on the stream; the close handler reports it.
     this.child.stdin.on('error', () => undefined);
     this.child.on('error', (error) => this.handleExit(`no se pudo lanzar la CLI: ${error.message}`));
     this.child.on('close', (code, signal) => {
@@ -126,7 +108,6 @@ export class CliWorker {
     });
   }
 
-  /** True while the process can still take a message (not exited, killed or retired). */
   get alive(): boolean {
     return !this.exited && !this.stopping;
   }
@@ -143,7 +124,6 @@ export class CliWorker {
     return this.child.pid;
   }
 
-  /** Sends one user message and resolves when the CLI reports its result (or the turn is cut short). */
   runTurn(prompt: string, options: TurnOptions): Promise<TurnResult> {
     if (this.turn) throw new Error('CliWorker: ya hay una petición en curso en este proceso');
     const startedAt = performance.now();
@@ -151,7 +131,6 @@ export class CliWorker {
       return Promise.resolve(this.failure('error', startedAt, 'el proceso de la CLI ya no está en ejecución'));
     }
     if (options.signal?.aborted) {
-      // Nothing was sent, so the process is still as good as new: leave it alone.
       return Promise.resolve(this.failure('cancelled', startedAt));
     }
     return new Promise<TurnResult>((resolve) => {
@@ -179,7 +158,6 @@ export class CliWorker {
     });
   }
 
-  /** Lets the process exit on its own by closing stdin; force-kills it if it lingers. */
   retire(graceMs = 2000): void {
     if (this.exited || this.stopping) return;
     this.stopping = true;
@@ -227,7 +205,6 @@ export class CliWorker {
         this.turnsServed++;
         this.finish({
           status: event.isError ? 'error' : 'ok',
-          // `result` is the authoritative final text; the deltas only matter when it is missing.
           text: event.isError ? '' : event.text || turn.text || turn.assistantText,
           errorMessage: event.isError ? event.text || `la CLI devolvió un error (${event.subtype})` : undefined,
           usage: event.usage,
@@ -266,7 +243,6 @@ export class CliWorker {
     turn.options.signal?.removeEventListener('abort', turn.onAbort);
     const now = performance.now();
     const text = outcome.text ?? turn.text;
-    // Cut short after the model started answering: the input was already consumed, so report it.
     const partial = outcome.usage === undefined && turn.startUsage !== null;
     const usage: Usage =
       outcome.usage ??

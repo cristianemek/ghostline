@@ -1,10 +1,7 @@
 import { withoutStructuralTags } from '../completion/promptBuilder';
 import { identifiers } from '../learning/similarity';
 
-/** Pure helpers for the symbol context (declarations found through the language server). */
-
 export const MAX_SYMBOLS = 3;
-/** Ceiling for the whole block. */
 export const MAX_SYMBOL_TOKENS = 400;
 const MAX_SIGNATURE_CHARS = 240;
 const MAX_SIGNATURE_LINES = 4;
@@ -12,16 +9,10 @@ const MIN_IDENTIFIER_LENGTH = 3;
 
 export interface IdentifierUse {
   name: string;
-  /** Column where the identifier starts on the line. */
   character: number;
 }
 
-/**
- * Up to three identifiers of the line worth looking up: the ones closest to the cursor, without
- * keywords, short names or repeats.
- */
 export function pickIdentifiers(linePrefix: string, max: number = MAX_SYMBOLS): IdentifierUse[] {
-  // `identifiers` applies the keyword and length rules; it lower-cases, so compare that way.
   const meaningful = identifiers(linePrefix);
   const picked: IdentifierUse[] = [];
   const seen = new Set<string>();
@@ -30,7 +21,6 @@ export function pickIdentifiers(linePrefix: string, max: number = MAX_SYMBOLS): 
     if (picked.length >= max) break;
     const name = match[0];
     if (name.length < MIN_IDENTIFIER_LENGTH || !meaningful.has(name.toLowerCase()) || seen.has(name)) continue;
-    // A word inside a string or after a comment marker is prose, not a symbol.
     const before = linePrefix.slice(0, match.index);
     if (/\/\/|#(?!\w)/.test(before) || ((before.match(/["'`]/g)?.length ?? 0) % 2 === 1)) continue;
     seen.add(name);
@@ -39,13 +29,7 @@ export function pickIdentifiers(linePrefix: string, max: number = MAX_SYMBOLS): 
   return picked;
 }
 
-/**
- * The first identifiers after the cursor on its line, nearest first: what an insertion in front of
- * existing code is about ("items▮ store.ListItems(…)" needs to know what that call
- * returns). Columns are relative to the start of `restOfLine`.
- */
 export function pickIdentifiersAfter(restOfLine: string, max: number = MAX_SYMBOLS): IdentifierUse[] {
-  // A trailing comment is prose.
   const code = restOfLine.split(/\/\/|#(?!\w)/)[0] ?? '';
   const meaningful = identifiers(code);
   const picked: IdentifierUse[] = [];
@@ -61,18 +45,11 @@ export function pickIdentifiersAfter(restOfLine: string, max: number = MAX_SYMBO
   return picked;
 }
 
-/** A declaration as it goes into the prompt, with the identifier it was looked up for. */
 export interface SymbolLine {
   name: string;
   line: string;
 }
 
-/**
- * The bracket the cursor is inside of when it was opened on an earlier line: the call or the literal
- * being filled in ("…CreateParams{" three lines up). `above` holds the lines before the cursor's line,
- * nearest last. Undefined when it was opened on the cursor's own line (its identifiers are picked
- * anyway), when none is found, or when the brace opens a block of code rather than a value.
- */
 export function enclosingOpener(above: readonly string[], linePrefix: string): { linesUp: number; character: number } | undefined {
   let depth = 0;
   const scan = (text: string): number => {
@@ -92,7 +69,6 @@ export function enclosingOpener(above: readonly string[], linePrefix: string): {
     const character = scan(text);
     if (character < 0) continue;
     if (text[character] !== '{') return { linesUp, character };
-    // "Params{", "foo({", "x = {", "return {" hold a value; "if (ok) {", "class Foo {", "=> {" hold code.
     const before = text.slice(0, character);
     const value = /[\w$\]]$/.test(before) || /[([,=:]\s*$/.test(before) || /\breturn\s*$/.test(before);
     return value ? { linesUp, character } : undefined;
@@ -113,13 +89,9 @@ const MAX_TYPE_CHARS = 480;
 const MAX_TYPE_MEMBERS = 16;
 const MODIFIERS =
   /^(?:(?:export|default|declare|pub(?:\([^)]*\))?|public|private|protected|internal|abstract|sealed|static|final|partial|readonly|unsafe)\s+)+/;
-/** A declaration whose members are the whole point of looking it up, opening its body on that line. */
 const TYPE_HEADS = [
-  // Go: type Params struct {
   /^type\s+[\w$]+(?:\[[^\]]*\])?\s+(?:struct|interface)\s*\{$/,
-  // TypeScript: type Filters = {
   /^type\s+[\w$]+(?:<[^{}]*>)?\s*=\s*\{$/,
-  // TypeScript, Rust, Swift, Kotlin, the C family: interface Order {, pub struct Point {, enum Color {
   /^(?:const\s+)?(?:interface|struct|enum|trait|union)\s+[\w$]+[^{}=;()]*\{$/,
 ];
 
@@ -128,10 +100,6 @@ function opensTypeBody(line: string): boolean {
   return TYPE_HEADS.some((pattern) => pattern.test(bare));
 }
 
-/**
- * The members of a type whose body starts at `start`, one entry per member: names and types, never
- * values. Nested bodies are folded to "{…}". `complete` is false when the body was cut short.
- */
 function typeMembers(lines: readonly string[], start: number): { members: string[]; complete: boolean } {
   const members: string[] = [];
   let depth = 1;
@@ -150,7 +118,6 @@ function typeMembers(lines: readonly string[], start: number): { members: string
     if (members.length >= MAX_TYPE_MEMBERS) return { members, complete: false };
     let member = depth > depthBefore ? `${text.slice(0, text.lastIndexOf('{')).trimEnd()} {…}` : text;
     member = member
-      // Go struct tags, the separator, and anything assigned (an enum value, a default).
       .replace(/\s*`[^`]*`\s*$/, '')
       .replace(/[,;]\s*$/, '')
       .replace(/\s*(?<![=!<>])=(?!>).*$/, '')
@@ -161,12 +128,6 @@ function typeMembers(lines: readonly string[], start: number): { members: string
   return { members, complete: false };
 }
 
-/**
- * The declaration that starts at `line`, on one line: enough to tell the model the name, parameters
- * and return type. A signature split over several lines is joined until its parentheses close. For a
- * struct, interface, object type or enum the members are included too (`members: false` keeps it to
- * the head): the fields of a type are what a literal or a call being written needs.
- */
 export function extractSignature(lines: readonly string[], line: number, members = true): string {
   const head = (lines[line] ?? '').trim();
   if (members && opensTypeBody(head)) {
@@ -185,7 +146,6 @@ export function extractSignature(lines: readonly string[], line: number, members
     signature += ' ' + (lines[next] ?? '').trim();
     next++;
   }
-  // The body is of no use here: keep what comes before it.
   signature = signature.replace(/\s*\{\s*\}?\s*$/, '').replace(/\s*=>\s*\{?\s*$/, ' =>').replace(/\s+/g, ' ').trim();
   signature = withoutValues(signature);
   return signature.length > MAX_SIGNATURE_CHARS ? signature.slice(0, MAX_SIGNATURE_CHARS - 1) + '…' : signature;
@@ -193,16 +153,10 @@ export function extractSignature(lines: readonly string[], line: number, members
 
 const LITERAL_START = /^\s*(["'`\d[{-]|(?:true|false|null|none|nil|undefined)\b)/i;
 
-/**
- * A declaration is sent for its shape, never for its contents: `const API_KEY = "sk-…"` in a file
- * that no exclusion pattern covers must not travel as a "signature". Literal initialisers are
- * dropped and any long string literal that remains (a default argument, say) is blanked.
- */
 function withoutValues(signature: string): string {
   let result = signature;
   const paren = result.indexOf('(');
   const head = paren < 0 ? result : result.slice(0, paren);
-  // The first plain "=" before any parenthesis: an assignment, not ==, =>, <=, >= or !=.
   const assignment = /(?<![=!<>])=(?![=>])/.exec(head);
   if (assignment) {
     const value = result.slice(assignment.index + 1);
@@ -212,12 +166,10 @@ function withoutValues(signature: string): string {
 }
 
 export interface ResolvedSymbol {
-  /** Workspace-relative path of the file that defines it. */
   path: string;
   signature: string;
 }
 
-/** One line per symbol, within the token budget. */
 export function formatSymbols(symbols: readonly ResolvedSymbol[], charsPerToken: number, maxTokens: number = MAX_SYMBOL_TOKENS): string[] {
   const lines: string[] = [];
   const seen = new Set<string>();

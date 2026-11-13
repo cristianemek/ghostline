@@ -42,7 +42,6 @@ test('recent: answers are kept with their outcome, newest first, and survive a r
   recent.add(entry({ id: 34 }));
   recent.add(entry({ id: 35, shown: '', raw: '<none/>', outcome: 'vacía' }));
   recent.resolve(34, 'aceptada');
-  // An outcome for a request that left no entry (a cache hit, say) changes nothing.
   recent.resolve(99, 'ignorada');
   assert.deepEqual(
     recent.list().map((item) => [item.id, item.outcome]),
@@ -72,7 +71,6 @@ test('recent: bounded in number and in size; request numbers restart with each w
   assert.ok(long.before.length <= 160 && long.before.endsWith('END'));
   assert.ok(long.after.length <= 160 && long.after.startsWith('START'));
   assert.ok(long.raw.length <= 400 && long.shown.length <= 400);
-  // After a reload the window counts from 1 again: an outcome goes to the latest entry with that number.
   const reloaded = new RecentSuggestions(store);
   reloaded.add(entry({ id: 20, shown: 'new' }));
   reloaded.resolve(20, 'ignorada');
@@ -80,7 +78,6 @@ test('recent: bounded in number and in size; request numbers restart with each w
   assert.deepEqual(twenties.map((item) => item.outcome), ['ignorada', 'sin resolver']);
   reloaded.clear();
   assert.equal(new RecentSuggestions(store).list().length, 0);
-  // Foreign or broken stored data is ignored.
   store.data.set('ghostline.recent.v1', [null, { id: 'x' }, 'nope']);
   assert.equal(new RecentSuggestions(store).list().length, 0);
 });

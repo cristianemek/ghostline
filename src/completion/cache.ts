@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 
-/** Small LRU cache with a time-to-live per entry. */
 export class LruCache<V> {
   private readonly entries = new Map<string, { value: V; expiresAt: number }>();
 
@@ -17,7 +16,6 @@ export class LruCache<V> {
       this.entries.delete(key);
       return undefined;
     }
-    // Re-insert so the entry becomes the most recently used.
     this.entries.delete(key);
     this.entries.set(key, entry);
     return entry.value;
@@ -42,7 +40,6 @@ export class LruCache<V> {
   }
 }
 
-/** Cache key: the file plus what immediately surrounds the cursor. */
 export function completionKey(path: string, prefix: string, suffix: string): string {
   return createHash('sha1')
     .update(path)
@@ -57,28 +54,20 @@ const TAIL_CHARS = 200;
 
 interface Remembered {
   documentKey: string;
-  /** Offset of the cursor when the suggestion was shown. */
   offset: number;
-  /** Text right before that offset, to notice edits made elsewhere. */
   tail: string;
   text: string;
   id: number;
 }
 
 export interface TypeaheadMatch {
-  /** What is left of the suggestion after what the user has typed; empty once it is all there. */
   rest: string;
   typed: string;
   id: number;
 }
 
-/** Returns the document text between two offsets, with line endings normalised to "\n". */
 export type DocumentReader = (start: number, end: number) => string;
 
-/**
- * Remembers the last suggestion shown. While the user types exactly its first characters, the rest
- * is served from here: no request, zero tokens.
- */
 export class Typeahead {
   private last: Remembered | null = null;
 
@@ -86,19 +75,15 @@ export class Typeahead {
     this.last = { documentKey, offset, tail: read(Math.max(0, offset - TAIL_CHARS), offset), text: suggestion, id };
   }
 
-  /** @param offset current cursor offset */
   match(documentKey: string, offset: number, read: DocumentReader): TypeaheadMatch | null {
     const last = this.last;
     if (!last || last.documentKey !== documentKey || offset < last.offset) return null;
     if (read(Math.max(0, last.offset - TAIL_CHARS), last.offset) !== last.tail) return null;
-    // Compare text, not offsets: in a CRLF document a typed line break is two characters.
     const typed = read(last.offset, offset);
     if (!last.text.startsWith(typed)) return null;
-    // `rest` is empty when the whole suggestion has been typed (or inserted by accepting it).
     return { rest: last.text.slice(typed.length), typed, id: last.id };
   }
 
-  /** Id of the suggestion currently remembered, if any. */
   get currentId(): number | null {
     return this.last?.id ?? null;
   }

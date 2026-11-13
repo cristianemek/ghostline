@@ -22,7 +22,6 @@ test('the server the requests go to is reported when the environment points away
   assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: '  ' }), undefined);
   assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: 'https://api.anthropic.com' }), undefined);
   assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: 'https://gateway.example.com/v1' }), 'gateway.example.com');
-  // Credentials in the address are never repeated.
   assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: 'http://user:hunter2@10.0.0.7:8080/x' }), '10.0.0.7:8080');
   assert.equal(endpointOverride({ ANTHROPIC_BASE_URL: 'not a url' }), 'una dirección no reconocible');
 });
@@ -63,7 +62,6 @@ test('environment: inherited, without prompt caching or auto-update, and detache
   const env = buildCliEnv(base, { promptCache: false });
   assert.equal(env.PATH, '/usr/bin');
   assert.equal(env.HOME, '/home/me');
-  // Authentication and configuration variables are the user's: untouched.
   assert.equal(env.CLAUDE_CONFIG_DIR, '/custom/config');
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'keep-me');
   assert.equal(env.DISABLE_PROMPT_CACHING, '1');
@@ -71,10 +69,8 @@ test('environment: inherited, without prompt caching or auto-update, and detache
   for (const name of Object.keys(base).filter((key) => /^CLAUDECODE$|SESSION|MESSAGING|ENTRYPOINT/.test(key))) {
     assert.equal(env[name], undefined, name);
   }
-  // The caller's environment object is not modified.
   assert.equal(base.CLAUDECODE, '1');
   assert.equal(buildCliEnv({ DISABLE_PROMPT_CACHING: '1' }, { promptCache: true }).DISABLE_PROMPT_CACHING, undefined);
-  // With the cache on, what is unique to each request is written with the short (cheaper) lifetime.
   assert.equal(buildCliEnv({}, { promptCache: true }).CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL, '5m');
   assert.equal(buildCliEnv({ CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL: '1h' }, { promptCache: true }).CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL, '5m');
   assert.equal(buildCliEnv({ CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL: '1h' }, { promptCache: false }).CLAUDE_CODE_MESSAGES_PROMPT_CACHE_TTL, undefined);
@@ -96,7 +92,6 @@ const session: SessionInfo = {
   limitReached: false,
   dailyLimit: 1500,
   apiKeySource: 'none',
-  // 123 completions at 0,00025 $ against a session worth 80 $.
   sessionSpentUsd: 0.0312,
   sessionBudgetUsd: 80,
 };
@@ -123,27 +118,21 @@ function busyDay() {
 }
 
 test('status bar text: share of ghostline’s own daily cap · share of a Claude session ghostline has used', () => {
-  // The second figure is ghostline's own part, not how full the session is (59% here).
   assert.equal(statusText(busyDay(), { ...session, rateLimit }), '$(ghostline-ghost) 8% · Claude 0,04%');
   assert.equal(statusText(busyDay(), session), '$(ghostline-ghost) 8% · Claude 0,04%');
   assert.equal(statusText(emptyDay('2026-11-11'), { ...session, sessionSpentUsd: 0 }), '$(ghostline-ghost) 0% · Claude 0%');
-  // Something used never reads as 0%.
   assert.equal(
     statusText({ ...emptyDay('2026-11-11'), requests: 11 }, { ...session, sessionSpentUsd: 0.0005 }),
     '$(ghostline-ghost) <1% · Claude <0,01%',
   );
-  // The whole daily cap in one session: 1.500 × 0,00025 $.
   assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 0.375 }), '$(ghostline-ghost) 8% · Claude 0,47%');
-  // Fewer decimals as it grows (another model, a smaller plan).
   assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 2.64 }), '$(ghostline-ghost) 8% · Claude 3,3%');
   assert.equal(statusText(busyDay(), { ...session, sessionSpentUsd: 20 }), '$(ghostline-ghost) 8% · Claude 25%');
-  // Without a daily cap there is no share to show: the count.
   assert.equal(statusText(busyDay(), { ...session, dailyLimit: 0 }), '$(ghostline-ghost) 123 · Claude 0,04%');
   assert.match(statusText(busyDay(), { ...session, paused: true }), /^\$\(ghostline-ghost\) \$\(debug-pause\) 8%/);
   assert.match(statusText(busyDay(), { ...session, triggerMode: 'manual' }), /^\$\(ghostline-ghost\) manual · 8%/);
   assert.match(statusText(busyDay(), { ...session, limitReached: true }), /^\$\(ghostline-ghost\) \$\(circle-slash\) 8%/);
   assert.match(statusText(busyDay(), { ...session, cliError: 'no claude' }), /^\$\(ghostline-ghost\) \$\(warning\) sin CLI$/);
-  // Where icons are not drawn (a prompt, a screen reader) the ghost is the name and the rest is words.
   assert.equal(plainStatus(statusText(busyDay(), session)), 'ghostline 8% · Claude 0,04%');
   assert.equal(plainStatus(statusText(busyDay(), { ...session, paused: true })), 'ghostline 8% · Claude 0,04%');
   assert.equal(plainStatus(statusText(busyDay(), { ...session, triggerMode: 'manual' })), 'ghostline manual · 8% · Claude 0,04%');
@@ -151,10 +140,8 @@ test('status bar text: share of ghostline’s own daily cap · share of a Claude
 });
 
 test('tooltip: name and state, the figures with their drawings, warnings, and shortcuts', () => {
-  /** The drawings of a tooltip, decoded: it carries them as inline SVG images. */
   const drawings = (markdown: string): string[] =>
     [...markdown.matchAll(/\]\(data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)\)/g)].map((match) => Buffer.from(match[1] as string, 'base64').toString('utf8'));
-  /** Its meters: for each, the widths of the bars drawn over the track, in the order they are drawn. */
   const meters = (markdown: string): number[][] =>
     drawings(markdown)
       .filter((drawing) => drawing.includes(`viewBox="0 0 ${METER_WIDTH} 8"`))
@@ -168,13 +155,10 @@ test('tooltip: name and state, the figures with their drawings, warnings, and sh
   assert.match(tooltip, /ghostline: 0,0312 \$ de unos 80 \$ · la sesión entera va por el 59%/);
   assert.match(tooltip, /^### !\[\]\([^)]+\)&nbsp; 34% &nbsp;.*· aceptadas/m);
   assert.match(tooltip, /34 de 100 sugerencias/);
-  // 300 pixels each: 8% of the cap; a session 59% full, of which ghostline is a sliver (drawn over it); 34% accepted.
   assert.deepEqual(meters(tooltip), [[25], [185, 8], [102]]);
   assert.deepEqual(meterStops([{ rate: 0.5 }, { rate: 0.7 }]), [150, 300]);
   assert.deepEqual(meterStops([{ rate: 0 }, { rate: 0.0001 }, { rate: -1 }]), [0, 8, 8]);
-  // Every drawing is a complete SVG and nothing else: no scripts, no links out.
   for (const drawing of drawings(tooltip)) assert.match(drawing, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" [^>]+>(?:<(?:rect|circle|path|g|\/g)[^<>]*>)+<\/svg>$/);
-  // The shortcuts, and nothing clickable beyond ghostline's own commands.
   assert.match(tooltip, /\[\$\(debug-pause\) Pausar\]\(command:ghostline\.togglePause\)/);
   assert.match(tooltip, /\[\$\(person\) Modo manual\]\(command:ghostline\.toggleTriggerMode\)/);
   for (const [, command] of tooltip.matchAll(/\(command:([\w.]+)/g)) assert.ok(TOOLTIP_COMMANDS.includes(command as string), command);
@@ -183,21 +167,16 @@ test('tooltip: name and state, the figures with their drawings, warnings, and sh
   assert.match(paused, /\[\$\(debug-start\) Reanudar\]/);
   assert.match(paused, /\[\$\(zap\) Modo auto\]/);
 
-  // Before the CLI has said anything about the session: ghostline's part only.
   const alone = tooltipMarkdown(busyDay(), session);
   assert.match(alone, /ghostline: 0,0312 \$ de unos 80 \$</);
   assert.deepEqual(meters(alone)[1], [8]);
-  // Nothing used, nothing drawn over the tracks.
   assert.deepEqual(meters(tooltipMarkdown(emptyDay('2026-11-11'), { ...session, sessionSpentUsd: 0 })), [[], [], []]);
-  // Without a cap there is a count and no meter for it.
   const uncapped = tooltipMarkdown(busyDay(), { ...session, dailyLimit: 0 });
   assert.match(uncapped, /^### !\[\]\([^)]+\)&nbsp; 123 &nbsp;.*· peticiones hoy[\s\S]*sin tope diario/m);
   assert.equal(meters(uncapped).length, 2);
-  // A share too small to put a figure on is not also "about".
   assert.match(tooltipMarkdown(busyDay(), { ...session, sessionSpentUsd: 0.0005 }), /&nbsp; <0,01% &nbsp;/);
   assert.match(tooltipMarkdown(busyDay(), { ...session, muted: ['go al final de línea'] }), /Silenciado 24 h: go al final de línea/);
 
-  // With an API key there is no session to take a share of: what today has cost, in the bar and in the tooltip.
   const withKey = { ...session, apiKeySource: 'ANTHROPIC_API_KEY' };
   assert.equal(statusText(busyDay(), withKey), '$(ghostline-ghost) 8% · 0,03 $');
   assert.equal(statusText({ ...busyDay(), costUsd: 0.004 }, withKey), '$(ghostline-ghost) 8% · <0,01 $');
@@ -208,7 +187,6 @@ test('tooltip: name and state, the figures with their drawings, warnings, and sh
   assert.ok(!keyed.includes('sesión de Claude') && !keyed.includes('$(warning)'), keyed);
 
   assert.match(tooltipMarkdown(busyDay(), { ...session, limitReached: true }), /Límite diario alcanzado \(1500\)/);
-  // What did not come from ghostline cannot bring markup, a link or an icon of its own.
   const hostile = tooltipMarkdown(busyDay(), { ...session, cliError: 'no existe C:\\x\\[y](command:evil) <b>$(zap)</b>' });
   assert.ok(!hostile.includes('](command:evil)') && !hostile.includes('<b>'), hostile);
   assert.match(hostile, /\\\[y\\\]\\\(command:evil\\\) &lt;b&gt;\\\$\\\(zap\\\)&lt;\/b&gt;/);
@@ -221,11 +199,8 @@ test('the Claude session ghostline’s spend is measured against', () => {
     status: 'allowed',
     windows: { five_hour: { utilization: 0.2, resetsAt: endMs / 1000, status: 'allowed' } },
   });
-  // The session the CLI last saw ends in two hours: it began three hours ago.
   assert.equal(sessionStart(windowEnding(now + 2 * hour), now), now - 3 * hour);
-  // That session ended an hour ago: what came after belongs to the next one.
   assert.equal(sessionStart(windowEnding(now - hour), now), now - hour);
-  // Nothing reported yet, or something stale: the last five hours.
   assert.equal(sessionStart(undefined, now), now - 5 * hour);
   assert.equal(sessionStart(windowEnding(now - 9 * hour), now), now - 5 * hour);
 });

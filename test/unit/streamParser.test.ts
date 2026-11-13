@@ -52,7 +52,6 @@ test('real capture: init, deltas and result are extracted, everything else is ig
   assert.ok(result.costUsd > 0);
   assert.ok(result.durationMs > 0);
 
-  // system/status and the non-text stream events are present in the capture but not interesting.
   assert.ok(kinds(events).includes('unknown'));
 });
 
@@ -96,7 +95,7 @@ test('lines split at arbitrary byte positions parse the same', () => {
 
 test('a multi-byte character split across chunks is not corrupted', () => {
   const line = Buffer.from(JSON.stringify({ type: 'result', result: 'añadir → ñandú 🚀', is_error: false }) + '\n');
-  const cut = line.indexOf(Buffer.from('ñ')) + 1; // in the middle of the two-byte "ñ"
+  const cut = line.indexOf(Buffer.from('ñ')) + 1;
   const { events } = parseAll([line.subarray(0, cut), line.subarray(cut)]);
   const result = events[0];
   assert.ok(result && result.kind === 'result');
@@ -113,7 +112,7 @@ test('unknown types, blank lines, CRLF and garbage are tolerated', () => {
     '{"type":"autocompact_state"}\n',
     '{"no_type":true}\n',
     '{"type":"system","subtype":"status","status":"requesting"}\n',
-    '{"type":"result","subtype":"success","is_error":false,"result":"ok"}', // no trailing newline
+    '{"type":"result","subtype":"success","is_error":false,"result":"ok"}',
   ];
   const { events, bad } = parseAll(input);
   assert.equal(bad, 3);

@@ -2,14 +2,8 @@ import { StringDecoder } from 'node:string_decoder';
 
 export type JsonObject = Record<string, unknown>;
 
-/** A single line longer than this is dropped instead of buffered forever. */
 const MAX_LINE_CHARS = 4 * 1024 * 1024;
 
-/**
- * Incremental NDJSON parser for the CLI's `--output-format stream-json` output.
- * Tolerates chunks that split a line (or a multi-byte character) anywhere, CRLF line endings,
- * blank lines and lines that are not JSON objects (those are counted and skipped).
- */
 export class NdjsonParser {
   private readonly decoder = new StringDecoder('utf8');
   private buffer = '';
@@ -28,7 +22,6 @@ export class NdjsonParser {
       const line = this.buffer.slice(0, newline);
       this.buffer = this.buffer.slice(newline + 1);
       if (this.overflowing) {
-        // Tail of a line whose head was already discarded.
         this.overflowing = false;
       } else {
         this.handleLine(line);
@@ -42,7 +35,6 @@ export class NdjsonParser {
     }
   }
 
-  /** Flushes a final line that did not end with a newline. */
   end(): void {
     this.buffer += this.decoder.end();
     if (!this.overflowing) this.handleLine(this.buffer);
@@ -89,7 +81,6 @@ export const ZERO_USAGE: Readonly<Usage> = Object.freeze({
   cacheWriteTokens: 0,
 });
 
-/** Everything the request sent to the model: fresh input plus both cache counters. */
 export function totalInputTokens(usage: Usage): number {
   return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
 }
@@ -184,10 +175,6 @@ function parseRateLimit(raw: unknown): RateLimitInfo {
   return { status: str(info.status), windows };
 }
 
-/**
- * Maps one raw CLI message to the few events ghostline cares about.
- * Anything else (new message types, hook events, status updates…) becomes `unknown` and is ignored upstream.
- */
 export function toCliEvent(obj: JsonObject): CliEvent {
   const type = str(obj.type);
   switch (type) {
@@ -221,7 +208,6 @@ export function toCliEvent(obj: JsonObject): CliEvent {
     case 'result':
       return {
         kind: 'result',
-        // The CLI reports API and auth failures as subtype "success" with is_error true: trust is_error only.
         isError: obj.is_error === true,
         subtype: str(obj.subtype),
         text: str(obj.result),
