@@ -73,7 +73,8 @@ async function answer(message) {
   }
 
   const prompt = typeof message?.message?.content === 'string' ? message.message.content : '';
-  const completion = (process.env.FAKE_TEXT || 'fake completion')
+  if (process.env.FAKE_PROMPT_FILE) fs.writeFileSync(process.env.FAKE_PROMPT_FILE, prompt);
+  const completion =(process.env.FAKE_TEXT || 'fake completion')
     .replace('{turn}', String(turn))
     .replace('{promptLength}', String(prompt.length));
   const line = /<line>([^\n]*)▮([^\n]*)<\/line>\s*$/.exec(prompt);
