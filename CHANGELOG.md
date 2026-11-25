@@ -1,5 +1,25 @@
 # Cambios
 
+## 0.15.0
+
+- Cambios: cuando lo que toca es cambiar algo ya escrito y no completar (un nombre que no existe, una línea
+  fuera de su bucle), se propone ese cambio sobre el código, con `Tab` para aplicarlo y `Esc` para
+  descartarlo, en lugar de sugerir código que no encaja. Si el cambio no se puede escribir, se dice en gris
+  al final de la línea. Se apaga con `ghostline.changes`.
+- Cambios y correcciones dentro de una línea se marcan en su sitio: se tacha solo lo que sobra y lo nuevo
+  aparece al lado, en vez de repetir la línea entera a la derecha.
+- Una sugerencia que termina justo después del tope de líneas conserva la línea que cierra su bloque.
+- Mensaje del commit: un botón en la barra del panel de control de código fuente lo escribe a partir de los
+  cambios preparados, o de todos si no hay ninguno, siguiendo el estilo de los últimos commits. Los archivos
+  excluidos no se envían.
+- La sentencia siguiente ya no sale pegada al final de la línea en la que está el cursor.
+- Lo que el modelo se dice a sí mismo («Wait, that's wrong…»), sus explicaciones y sus marcas de fin de
+  respuesta (`</s>`) ya no llegan al editor.
+- En mitad de una línea se aprovecha la respuesta aunque el modelo retoque un espacio o devuelva solo lo que
+  falta, y no se repite un paréntesis que ya está después del cursor.
+- No se pide nada tras una línea que solo cierra un bloque.
+- Las correcciones dejan en paz los errores de código a medio escribir (variables o imports sin usar).
+
 ## 0.14.0
 
 - Popup de la barra de estado rehecho: icono y nombre, cada cifra en grande con su signo y su barra, y

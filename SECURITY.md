@@ -32,13 +32,14 @@ de Claude Code de ese equipo, y es la CLI la que guarda y usa la sesión.
 ## Lo que sale de tu equipo
 
 A Anthropic, a través de la CLI: el contexto alrededor del cursor del archivo que editas y, si no lo
-desactivas, nombres y tipos declarados en otros archivos del proyecto. Nunca nada de un archivo excluido, ni
-de lo que haya detrás de un enlace simbólico que salga del proyecto.
+desactivas, nombres y tipos declarados en otros archivos del proyecto. Cuando pides un mensaje de commit, el
+diff de los cambios que vas a confirmar y el título de tus últimos commits. Nunca nada de un archivo
+excluido, ni de lo que haya detrás de un enlace simbólico que salga del proyecto.
 
 ## Límites que conviene conocer
 
 - El archivo que editas se envía tal cual está alrededor del cursor. Una clave pegada en un archivo que no
-  esté excluido viaja con ese contexto.
+  esté excluido viaja con ese contexto, y con el diff si pides el mensaje de un commit que la incluye.
 - El texto de otros archivos puede intentar influir en la sugerencia. Como el modelo no tiene herramientas,
   lo más que consigue es una mala sugerencia, que tú decides si aceptas. Léela antes de pulsar `Tab`.
 - La CLI incluye por su cuenta en cada petición datos de tu sesión (el correo de la cuenta), igual que en

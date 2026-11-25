@@ -39,6 +39,11 @@ Si la barra de estado dice «sin CLI», pon en `ghostline.cliPath` la ruta del e
 - `Alt+\` (`Alt+ç` en teclado español) la pide a mano.
 - **Correcciones**: cuando el compilador marca errores junto al cursor, ghostline propone el bloque corregido
   encima del código. `Tab` lo aplica, `Esc` lo descarta.
+- **Cambios**: si lo que toca no es completar sino cambiar algo ya escrito (usas un nombre que no existe, la
+  línea va dentro del bucle de arriba), ghostline propone ese cambio igual que una corrección: `Tab` lo
+  aplica, `Esc` lo descarta. Solo cuando no puede escribirlo lo dice en gris al final de la línea.
+- **Mensaje del commit**: el fantasma de la barra del panel *Control de código fuente* lo escribe a partir
+  de los cambios preparados (o de todos, si no hay ninguno preparado), con el estilo de tus últimos commits.
 - **Barra de estado**: junto al fantasma, lo que llevas de tu tope diario y lo que ha gastado ghostline.
   Al pasar el ratón, el detalle; con un clic, pausar, cambiar de modo, ver el consumo, el log y las últimas
   sugerencias.
@@ -71,6 +76,7 @@ Si la barra de estado dice «sin CLI», pon en `ghostline.cliPath` la ruta del e
 | `ghostline.dailyRequestLimit` | `1500` | Tope de peticiones al día. |
 | `ghostline.context.symbols` | `true` | Enviar también declaraciones de otros archivos del proyecto. |
 | `ghostline.corrections` | `true` | Proponer correcciones. |
+| `ghostline.changes` | `true` | Proponer el cambio cuando lo que falla es algo ya escrito. |
 | `ghostline.excludePatterns` | `.env`, claves… | Archivos de los que nunca se envía nada. |
 
 El resto está en *Ajustes → ghostline → Avanzado*.
@@ -79,7 +85,8 @@ El resto está en *Ajustes → ghostline → Avanzado*.
 
 - **Qué se envía al proveedor de tu agente** (lo envía su CLI): hasta 60 líneas antes y 20 después del
   cursor y, con `ghostline.context.symbols`, nombres y tipos declarados en otros archivos del proyecto.
-  Nunca valores ni cuerpos de función.
+  Nunca valores ni cuerpos de función. Al pedir un mensaje de commit, el diff de esos cambios (hasta unos
+  14.000 caracteres) y el título de tus diez últimos commits.
 - **Qué no se envía nunca**: los archivos excluidos (`.env`, claves, credenciales…). Un repositorio puede
   añadir exclusiones, no quitarlas.
 - **Credenciales**: ghostline no lee, guarda ni transmite tu sesión ni tus claves; solo las usa la CLI de tu
