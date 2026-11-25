@@ -7,6 +7,9 @@ import { resolveCli } from './cli/resolveCli';
 import type { InitInfo, RateLimitInfo } from './cli/streamParser';
 import { WORK_FOLDER_PREFIX, createWorkFolder, ensureEmptyWorkFolder, removeStaleWorkFolders } from './cli/workFolder';
 import { WorkerPool } from './cli/workerPool';
+import { NoteHint } from './completion/noteHint';
+import { CommitGenerator } from './scm/commitGenerator';
+import type { ChangedFile } from './scm/commitMessage';
 import { ACCEPT_COMMAND, GhostlineProvider } from './completion/provider';
 import { typedInsertionEnd } from './completion/trigger';
 import {
@@ -65,6 +68,8 @@ export interface GhostlineTestApi {
   systemPrompt(): Promise<string>;
   checkEdits(): Promise<void>;
   pendingEdit(): Proposal | undefined;
+  shownNote(): string | undefined;
+  commitMessageFor(files: ChangedFile[], recent: string[]): Promise<string>;
   adaptiveReport(): ContextReport[];
   refreshCount(): number;
   config(): GhostlineConfig;
@@ -85,6 +90,8 @@ class Ghostline implements vscode.Disposable {
   private readonly learning: Learning;
   private readonly indexer: ProjectIndexer;
   private readonly edits: EditSuggester;
+  private readonly notes: NoteHint;
+  private readonly commits: CommitGenerator;
   private systemPromptFile = '';
   private systemPromptSource = '';
   private projectChars = 0;
@@ -139,6 +146,7 @@ class Ghostline implements vscode.Disposable {
         );
       },
     });
+    this.notes = new NoteHint(context.extensionUri);
     this.provider = new GhostlineProvider({
       getConfig: () => this.config,
       getPool: () => this.getPool(),
@@ -157,6 +165,8 @@ class Ghostline implements vscode.Disposable {
       learning: this.learning,
       journal: this.recent,
       projectContextChars: () => this.projectChars,
+      onNote: (document, position, note) => this.notes.show(document, position, note),
+      onChange: (document, position, change, id) => this.edits.propose(document, position.line, change, id),
       symbols: createSymbolProvider({
         isPathExcluded: (file) => isPathExcluded(file, this.config.excludePatterns),
         charsPerToken: () => this.estimator.charsPerToken,
@@ -179,7 +189,17 @@ class Ghostline implements vscode.Disposable {
       estimator: this.estimator,
       log: (line) => this.log(line),
       onActivity: () => this.queueRender(),
+      onShown: () => this.notes.clear(),
       journal: this.recent,
+    });
+    this.commits = new CommitGenerator({
+      context,
+      getConfig: () => this.config,
+      launcher: () => this.launcher(),
+      cwd: () => this.cwd,
+      usage: this.usage,
+      log: (line) => this.log(line),
+      onActivity: () => this.queueRender(),
     });
 
     this.statusBar.command = 'ghostline.showMenu';
@@ -200,6 +220,7 @@ class Ghostline implements vscode.Disposable {
       vscode.commands.registerCommand('ghostline.clearLearning', () => this.clearLearning()),
       vscode.commands.registerCommand('ghostline.showRecent', () => this.showRecent()),
       vscode.commands.registerCommand('ghostline.openSettings', () => this.openSettings()),
+      vscode.commands.registerCommand('ghostline.generateCommitMessage', (source?: { rootUri?: vscode.Uri }) => this.commits.run(source)),
       vscode.commands.registerCommand('ghostline.acceptEdit', () => this.edits.accept()),
       vscode.commands.registerCommand('ghostline.dismissEdit', () => this.edits.dismiss()),
       vscode.languages.onDidChangeDiagnostics((event) => this.edits.diagnosticsChanged(event.uris)),
@@ -224,8 +245,11 @@ class Ghostline implements vscode.Disposable {
         const active = event.selections[0]?.active;
         if (active) this.provider.cursorMoved(event.textEditor.document, active);
         this.edits.selectionChanged(event.textEditor);
+        this.notes.selectionChanged(event.textEditor);
       }),
       vscode.window.onDidChangeActiveTextEditor(() => this.provider.dismiss()),
+      vscode.window.onDidChangeActiveTextEditor(() => this.notes.clear()),
+      this.notes,
     );
 
     this.flushTimer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS);
@@ -359,6 +383,8 @@ class Ghostline implements vscode.Disposable {
       recent: () => this.recent.list(),
       checkEdits: () => this.edits.check(),
       pendingEdit: () => this.edits.proposal,
+      shownNote: () => this.notes.text,
+      commitMessageFor: (files, recent) => this.commits.ask({ files, excluded: 0, recent }),
       systemPrompt: async () => {
         if (this.config.symbolContext) await this.indexer.scan();
         this.refreshProjectContext();
@@ -527,7 +553,10 @@ class Ghostline implements vscode.Disposable {
   }
 
   private onDocumentChange(event: vscode.TextDocumentChangeEvent): void {
-    if (event.contentChanges.length > 0) this.edits.documentChanged(event.document);
+    if (event.contentChanges.length > 0) {
+      this.edits.documentChanged(event.document);
+      this.notes.documentChanged(event.document);
+    }
     if (event.contentChanges.length === 0 || event.reason !== undefined) return;
     if (event.document !== vscode.window.activeTextEditor?.document) return;
     this.provider.noteKeystroke(event.document.uri.toString(), typedInsertionEnd(event.contentChanges));

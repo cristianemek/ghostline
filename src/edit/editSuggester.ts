@@ -6,7 +6,21 @@ import { DEFAULT_LIMITS } from '../completion/promptBuilder';
 import type { RecentEntry } from '../usage/recent';
 import type { TokenEstimator } from '../usage/tokenEstimator';
 import type { UsageTracker } from '../usage/usageTracker';
-import { buildFixPrompt, diffLines, fixRegion, hunkPreview, parseFix, type FixRegion, type Hunk, type Problem } from './fix';
+import {
+  buildFixPrompt,
+  changedLines,
+  diffLines,
+  fixRegion,
+  hunkPreview,
+  isWorkInProgress,
+  lineSpans,
+  locateChange,
+  parseFix,
+  type Change,
+  type FixRegion,
+  type Hunk,
+  type Problem,
+} from './fix';
 
 export interface EditDeps {
   getConfig(): GhostlineConfig;
@@ -19,6 +33,7 @@ export interface EditDeps {
   estimator: TokenEstimator;
   log(line: string): void;
   onActivity(): void;
+  onShown?(): void;
   journal?: { add(entry: RecentEntry): void; resolve(id: number, outcome: string): void };
 }
 
@@ -30,6 +45,11 @@ export interface Proposal {
   newLines: string[];
 }
 
+type Shown = Proposal & { editor: vscode.TextEditor; fromCompletion?: boolean };
+
+export type ChangeOutcome = 'shown' | 'none' | { note: string };
+
+const NEAR_CURSOR_LINES = 2;
 const IDLE_MS = 1500;
 const RECENT_TYPING_MS = 6000;
 const MAX_REMEMBERED = 100;
@@ -50,9 +70,17 @@ export class EditSuggester {
       fontStyle: 'italic',
     },
   });
+  private readonly inPlace = vscode.window.createTextEditorDecorationType({
+    after: {
+      margin: '0 0.15em',
+      color: new vscode.ThemeColor('editor.foreground'),
+      backgroundColor: new vscode.ThemeColor('diffEditor.insertedTextBackground'),
+      fontStyle: 'italic',
+    },
+  });
   private timer: NodeJS.Timeout | undefined;
   private asking: AbortController | null = null;
-  private current: (Proposal & { editor: vscode.TextEditor }) | null = null;
+  private current: Shown | null = null;
   private statusMessage: vscode.Disposable | undefined;
   private readonly asked = new Set<string>();
   private nextId = FIRST_ID;
@@ -110,12 +138,25 @@ export class EditSuggester {
       return false;
     }
     this.clear();
-    const range = new vscode.Range(region.startLine, 0, region.endLine, document.lineAt(region.endLine).text.length);
+    const cursor = editor.selection.active;
+    const whole = newLines.length === 0 && region.endLine + 1 < document.lineCount;
+    const range = whole
+      ? new vscode.Range(region.startLine, 0, region.endLine + 1, 0)
+      : new vscode.Range(region.startLine, 0, region.endLine, document.lineAt(region.endLine).text.length);
     const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
     const applied = await editor.edit((builder) => builder.replace(range, newLines.join(eol)));
     if (applied) {
-      const lastLine = region.startLine + newLines.length - 1;
-      const end = new vscode.Position(lastLine, (newLines.at(-1) ?? '').length);
+      const lastLine = Math.max(region.startLine, region.startLine + newLines.length - 1);
+      const grown = newLines.length - (region.endLine - region.startLine + 1);
+      let end: vscode.Position;
+      if (shown.fromCompletion && cursor.line < region.startLine) {
+        end = cursor;
+      } else if (shown.fromCompletion && cursor.line > region.endLine) {
+        end = new vscode.Position(cursor.line + grown, cursor.character);
+      } else {
+        const line = Math.min(shown.fromCompletion ? Math.min(cursor.line, lastLine) : lastLine, document.lineCount - 1);
+        end = document.lineAt(line).range.end;
+      }
       editor.selection = new vscode.Selection(end, end);
       this.deps.usage.recordAccepted();
       this.deps.journal?.resolve(id, 'aceptada');
@@ -139,6 +180,7 @@ export class EditSuggester {
     this.clear();
     this.removed.dispose();
     this.added.dispose();
+    this.inPlace.dispose();
   }
 
   async check(): Promise<void> {
@@ -157,7 +199,7 @@ export class EditSuggester {
 
     const problems: Problem[] = vscode.languages
       .getDiagnostics(document.uri)
-      .filter((diagnostic) => diagnostic.severity === vscode.DiagnosticSeverity.Error)
+      .filter((diagnostic) => diagnostic.severity === vscode.DiagnosticSeverity.Error && !isWorkInProgress(diagnostic.message))
       .map((diagnostic) => ({ line: diagnostic.range.start.line, message: diagnostic.message }));
     const region = fixRegion((line) => document.lineAt(line).text, document.lineCount, problems, editor.selection.active.line);
     if (!region) return;
@@ -251,7 +293,29 @@ export class EditSuggester {
     }
   }
 
-  private show(proposal: Proposal & { editor: vscode.TextEditor }, oldLines: readonly string[]): void {
+  propose(document: vscode.TextDocument, cursorLine: number, change: Change, id: number): ChangeOutcome {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document !== document) return 'none';
+    if (Math.abs(editor.selection.active.line - cursorLine) > NEAR_CURSOR_LINES) return 'none';
+    const region = locateChange((line) => document.lineAt(line).text, document.lineCount, cursorLine, change.oldLines);
+    if (!region) return 'none';
+    const oldLines: string[] = [];
+    for (let line = region.startLine; line <= region.endLine; line++) oldLines.push(document.lineAt(line).text);
+    const newLines = changedLines(oldLines, change);
+    if (!newLines) return 'none';
+    const hunk = diffLines(oldLines, newLines)[0];
+    if (!hunk) return 'none';
+    const inSight = editor.visibleRanges.some((range) => range.start.line <= region.startLine && region.endLine <= range.end.line);
+    if (!inSight) return { note: `Línea ${region.startLine + hunk.oldStart + 1}: ${hunkPreview(hunk)}` };
+
+    this.asking?.abort();
+    if (this.current) this.dismiss('llegó otra propuesta');
+    this.deps.log(`cambio #${id} ${document.languageId} · líneas ${region.startLine + 1}–${region.endLine + 1} · ${newLines.length} líneas propuestas`);
+    this.show({ id, editor, documentKey: document.uri.toString(), documentVersion: document.version, region, newLines, fromCompletion: true }, oldLines);
+    return 'shown';
+  }
+
+  private show(proposal: Shown, oldLines: readonly string[]): void {
     const { editor, region, newLines } = proposal;
     const { document } = editor;
     const hover = new vscode.MarkdownString();
@@ -259,7 +323,20 @@ export class EditSuggester {
     hover.appendCodeblock(newLines.join('\n'), document.languageId);
     const removed: vscode.DecorationOptions[] = [];
     const added: vscode.DecorationOptions[] = [];
+    const inPlace: vscode.DecorationOptions[] = [];
     for (const hunk of diffLines(oldLines, newLines)) {
+      const lineNumber = region.startLine + hunk.oldStart;
+      const spans = hunk.oldCount === 1 && hunk.newLines.length === 1 ? lineSpans(oldLines[hunk.oldStart] as string, hunk.newLines[0] as string) : undefined;
+      if (spans) {
+        for (const span of spans) {
+          if (span.end > span.start) removed.push({ range: new vscode.Range(lineNumber, span.start, lineNumber, span.end), hoverMessage: hover });
+          if (span.text) {
+            const at = new vscode.Position(lineNumber, span.end);
+            inPlace.push({ range: new vscode.Range(at, at), hoverMessage: hover, renderOptions: { after: { contentText: span.text } } });
+          }
+        }
+        continue;
+      }
       for (let offset = 0; offset < hunk.oldCount; offset++) {
         const line = document.lineAt(region.startLine + hunk.oldStart + offset);
         removed.push({ range: new vscode.Range(line.lineNumber, line.firstNonWhitespaceCharacterIndex, line.lineNumber, line.text.length), hoverMessage: hover });
@@ -269,9 +346,11 @@ export class EditSuggester {
     this.current = proposal;
     editor.setDecorations(this.removed, removed);
     editor.setDecorations(this.added, added);
+    editor.setDecorations(this.inPlace, inPlace);
     void vscode.commands.executeCommand('setContext', CONTEXT_KEY, true);
     this.statusMessage = vscode.window.setStatusBarMessage('$(lightbulb) ghostline: corrección propuesta · Tab la aplica · Esc la descarta');
     this.deps.usage.recordShown();
+    this.deps.onShown?.();
   }
 
   private addedAfter(document: vscode.TextDocument, region: FixRegion, hunk: Hunk, hover: vscode.MarkdownString): vscode.DecorationOptions {
@@ -287,6 +366,7 @@ export class EditSuggester {
     if (shown) {
       shown.editor.setDecorations(this.removed, []);
       shown.editor.setDecorations(this.added, []);
+      shown.editor.setDecorations(this.inPlace, []);
     }
     this.statusMessage?.dispose();
     this.statusMessage = undefined;

@@ -110,6 +110,17 @@ fs.writeFileSync(path.join(workspace, 'src', 'flight.ts'), Array.from({ length: 
 fs.writeFileSync(path.join(workspace, 'src', 'pace.ts'), Array.from({ length: 12 }, (_, i) => (i % 2 ? `const total${i} = ` : `const partial${i}`)).join('\n') + '\n');
 fs.writeFileSync(path.join(workspace, 'src', 'errors.ts'), Array.from({ length: 20 }, (_, i) => `const item${i} = ${i};`).join('\n') + '\n');
 fs.writeFileSync(path.join(workspace, 'src', 'seen.py'), Array.from({ length: 10 }, (_, i) => `value_${i} = ${i}`).join('\n') + '\n');
+fs.writeFileSync(path.join(workspace, 'src', 'hint.ts'), Array.from({ length: 16 }, (_, i) => `const hint${i} = `).join('\n') + '\n');
+
+let gitReady = false;
+try {
+  const { execFileSync } = require('child_process');
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: workspace, stdio: 'ignore' });
+  git('init', '-q');
+  git('add', '-A', '-f');
+  git('commit', '-q', '-m', 'feat: estado inicial del taller');
+  gitReady = true;
+} catch {}
 
 fs.mkdirSync(path.join(root, 'user-data', 'User'), { recursive: true });
 fs.writeFileSync(
@@ -159,6 +170,7 @@ if (typingMode) {
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.GHOSTLINE_E2E_RESULT = resultFile;
+if (gitReady) env.GHOSTLINE_E2E_GIT = '1';
 if (!typingMode) {
   Object.assign(env, {
     GHOSTLINE_TEST_CLI: JSON.stringify({ command: process.execPath, prefixArgs: [path.join(repo, 'test', 'fake-claude.js')] }),

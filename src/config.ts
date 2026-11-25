@@ -18,6 +18,7 @@ export interface GhostlineConfig {
   speculation: Speculation;
   midLine: boolean;
   corrections: boolean;
+  changes: boolean;
   maxLines: number;
   requestTimeoutMs: number;
   dailyRequestLimit: number;
@@ -112,6 +113,7 @@ export function readConfig(): GhostlineConfig {
     speculation: oneOf(user('speculation'), ['off', 'line'] as const, 'off'),
     midLine: user('midLine') !== false && workspace('midLine').every((value) => value !== false),
     corrections: user('corrections') !== false && workspace('corrections').every((value) => value !== false),
+    changes: user('changes') !== false && workspace('changes').every((value) => value !== false),
     prefixLines: Math.min(prefixLines, ...workspace('context.prefixLines').map((value) => Math.floor(number(value, prefixLines, 1)))),
     suffixLines: Math.min(suffixLines, ...workspace('context.suffixLines').map((value) => Math.floor(number(value, suffixLines)))),
     symbolContext: user('context.symbols') !== false && workspace('context.symbols').every((value) => value !== false),

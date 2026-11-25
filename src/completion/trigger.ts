@@ -4,6 +4,10 @@ export function cursorAllowsAuto(restOfLine: string): boolean {
   return ONLY_CLOSERS_AFTER_CURSOR.test(restOfLine);
 }
 
+export function closesBlock(linePrefix: string, restOfLine: string): boolean {
+  return restOfLine.trim() === '' && /^[)\]}]+[;,]?$/.test(linePrefix.trim());
+}
+
 const WORD_CHAR = /[A-Za-z0-9_$]/;
 const MAX_TYPED_CHARS = 2;
 

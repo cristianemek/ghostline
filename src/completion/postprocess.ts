@@ -101,6 +101,14 @@ const MARKUP_LANGUAGES = new Set([
   'mdx',
 ]);
 
+const END_TOKEN = /<\|(?:endoftext|im_end|eot_id|end)\|>|<eos>|\[\/INST\]|<\/(?:prefix|suffix|symbols|accepted)>/;
+const FORMAT_TAG = new RegExp(`${END_TOKEN.source}|</(?:s|parameter|invoke|function_calls|answer|completion|output|response|result|line|file|region|fix|note)>`);
+
+function cutAtFormatTag(text: string, languageId: string | undefined): string {
+  const found = (languageId && MARKUP_LANGUAGES.has(languageId) ? END_TOKEN : FORMAT_TAG).exec(text);
+  return found ? text.slice(0, found.index) : text;
+}
+
 function removeStrayClosingTag(text: string, languageId: string | undefined): string {
   if (languageId && MARKUP_LANGUAGES.has(languageId)) return text;
   const stray = /<\/([A-Za-z][\w-]*)>\s*$/.exec(text);
@@ -181,6 +189,7 @@ const SELF_TALK = new RegExp(
     String.raw`\?\s*no\b\s*[—–.;]`,
     String.raw`\bno\s*[—–]`,
     String.raw`\bno[,;] the\b`,
+    String.raw`(?:^|\n)[ \t]*(?:wait|actually|hmm+|hold on|sorry|oops|correction|scratch that)\b\s*[,.:;!—–]`,
   ].join('|'),
   'i',
 );
@@ -195,13 +204,16 @@ function cutAtSelfTalk(text: string, prefix: string, lineContent: string): strin
   return afterthought && outsideString(afterthought.index) ? text.slice(0, afterthought.index) : text;
 }
 
+const FUNCTION_WORD = /^(?:the|a|an|is|are|was|but|and|or|on|in|to|of|that|this|it|so|be|not|with|for|from|as|at|by|already|should|must|will|would|can|after|before)[,.:;]?$/;
+
 function looksLikeProse(line: string): boolean {
   const trimmed = line.trim();
   if (COMMENT_START.test(trimmed)) return false;
-  const words = trimmed.split(/\s+/);
+  const words = trimmed.split(/\s+/).map((word) => word.replace(/`/g, ''));
   const boundary = /[.!?] [A-Z]/.test(trimmed);
+  const sentence = /^[A-Z]/.test(trimmed) && words.length >= 8 && words.filter((word) => FUNCTION_WORD.test(word)).length >= 2;
   if (/^[A-Z]/.test(trimmed)) {
-    if (words.length < 6 || (!/[.!?:]$/.test(trimmed) && !boundary)) return false;
+    if (words.length < 6 || (!/[.!?:]$/.test(trimmed) && !boundary && !sentence)) return false;
   } else if (words.length < 10 || !boundary) {
     return false;
   }
@@ -226,7 +238,7 @@ function cutAtProse(text: string, prefix: string, lineContent: string, languageI
   return index < 0 ? text : lines.slice(0, index).join('\n');
 }
 
-export function hasUnmatchedCloser(text: string): boolean {
+function unmatchedCloserIndex(text: string): number {
   const stack: string[] = [];
   let quote: string | null = null;
   for (let i = 0; i < text.length; i++) {
@@ -242,10 +254,14 @@ export function hasUnmatchedCloser(text: string): boolean {
       stack.push(OPENERS[char] as string);
     } else if (CLOSERS.has(char)) {
       if (stack.at(-1) === char) stack.pop();
-      else return true;
+      else return i;
     }
   }
-  return false;
+  return -1;
+}
+
+export function hasUnmatchedCloser(text: string): boolean {
+  return unmatchedCloserIndex(text) >= 0;
 }
 
 function removePrefixOverlap(text: string, linePrefix: string): string {
@@ -376,6 +392,11 @@ function removeSuffixOverlap(text: string, linePrefix: string, suffix: string, t
   const rest = (newline < 0 ? suffix : suffix.slice(0, newline)).trim();
 
   if (rest) {
+    const closes = unmatchedCloserIndex(text);
+    if (closes >= 0 && text[closes] === rest[0]) {
+      const beyond = text.slice(closes + 1) + rest;
+      if (hasUnmatchedCloser(beyond) || unclosedOpeners(beyond) > 0) return text.slice(0, closes).trimEnd();
+    }
     for (let size = Math.min(rest.length, text.length); size >= 1; size--) {
       const overlap = rest.slice(0, size);
       if (!text.endsWith(overlap)) continue;
@@ -427,12 +448,38 @@ export function cleanBlock(raw: string, languageId?: string): string {
   return text.replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '');
 }
 
+function headEnd(line: string, head: string): number | 'partial' | null {
+  let i = 0;
+  let j = 0;
+  while (j < head.length) {
+    if (i < line.length && line[i] === head[j]) {
+      i++;
+      j++;
+    } else if (/\s/.test(head[j] as string)) {
+      j++;
+    } else if (i < line.length && /\s/.test(line[i] as string)) {
+      i++;
+    } else {
+      return i >= line.length ? 'partial' : null;
+    }
+  }
+  return i;
+}
+
+const reversed = (text: string): string => [...text].reverse().join('');
+
 export function insertionFromLine(answer: string, before: string, after: string): string {
   const line = firstLine(answer);
   const head = before.trimStart();
   const tail = after.trimEnd();
-  if (line.length <= head.length + tail.length || !line.startsWith(head) || !line.endsWith(tail)) return '';
-  return line.slice(head.length, line.length - tail.length);
+  if (line.length > head.length + tail.length && line.startsWith(head) && line.endsWith(tail)) {
+    return line.slice(head.length, line.length - tail.length);
+  }
+  const start = headEnd(line, head);
+  const fromEnd = headEnd(reversed(line), reversed(tail));
+  if (typeof start !== 'number' || typeof fromEnd !== 'number' || start + fromEnd >= line.length) return '';
+  const insertion = line.slice(start, line.length - fromEnd);
+  return insertion.trim() ? insertion : '';
 }
 
 function firstLine(answer: string): string {
@@ -444,28 +491,94 @@ export function insertionSoFar(partial: string, before: string): string | null {
   const line = firstLine(partial);
   const head = before.trimStart();
   if (line.startsWith(head)) return line.slice(head.length);
-  return head.startsWith(line) ? '' : null;
+  if (head.startsWith(line)) return '';
+  const start = headEnd(line, head);
+  return start === 'partial' ? '' : start === null ? null : line.slice(start);
+}
+
+export function bareInsertion(answer: string, before: string, after: string): string {
+  const candidate = cutAtFormatTag(firstLine(answer), undefined).trim();
+  const head = before.trimStart();
+  if (!candidate || candidate.length > 40 || EMPTY_MARKERS.has(candidate)) return '';
+  const tail = after.trim();
+  if (tail.length >= 3 && candidate.includes(tail)) return '';
+  const words = candidate.match(/[A-Za-z_$][\w$]{2,}/g) ?? [];
+  return words.some((word) => head.includes(word)) ? '' : candidate;
 }
 
 export function exceedsUsefulLength(text: string, maxLines: number): boolean {
   return text.length > Math.max(600, maxLines * 200) || text.split('\n').length > maxLines + 3;
 }
 
+const NOTE = /<note>\s*([\s\S]*?)\s*<\/note>/i;
+const ASIDE = /^\s*<(note|change)\b/i;
+const MAX_NOTE_CHARS = 180;
+const MAX_CHANGE_CHARS = 3000;
+
+const OWN_TAG_LANGUAGES = new Set(['xml', 'xsl', 'xaml', 'svg']);
+
+export function isAside(text: string, languageId?: string): boolean {
+  return ASIDE.test(text) && !(languageId && OWN_TAG_LANGUAGES.has(languageId));
+}
+
 export function shouldStopEarly(
   text: string,
   context: { maxLines: number; prefix: string; languageId?: string },
 ): boolean {
+  const aside = isAside(text, context.languageId) ? ASIDE.exec(text)?.[1]?.toLowerCase() : undefined;
+  if (aside) return text.toLowerCase().includes(`</${aside}>`) || text.length > (aside === 'note' ? MAX_NOTE_CHARS * 3 : MAX_CHANGE_CHARS);
   if (exceedsUsefulLength(text, context.maxLines)) return true;
   const normalized = text.replace(/\r\n?/g, '\n');
   const kept = cutAtProse(normalized, context.prefix, lastLine(context.prefix).trim(), context.languageId);
   return kept.length < normalized.length;
 }
 
+const COLON_OPENS_BLOCK = new Set(['python', 'yaml', 'coffeescript', 'nim', 'gdscript']);
+
+function startsOnNextLine(text: string, linePrefix: string, suffix: string, input: PostprocessInput): boolean {
+  const newline = suffix.indexOf('\n');
+  if ((newline < 0 ? suffix : suffix.slice(0, newline)).trim() !== '') return false;
+  const lead = leadingWhitespace(text);
+  if (lead.includes('\t')) return true;
+  if (!input.indent.insertSpaces || lead.length < 2) return false;
+  if (/[=,+\-*/%<>!&|?]\s*$/.test(linePrefix)) return false;
+  if (/:\s*$/.test(linePrefix) && !(input.languageId && COLON_OPENS_BLOCK.has(input.languageId))) return false;
+  return lead.length >= leadingWhitespace(linePrefix).length;
+}
+
+export function noteFrom(raw: string, prefix: string, languageId?: string): string | undefined {
+  const text = raw.replace(/\r\n?/g, '\n').trim();
+  if (languageId && OWN_TAG_LANGUAGES.has(languageId)) return undefined;
+  const explicit = NOTE.exec(text)?.[1];
+  const clip = (note: string): string | undefined => {
+    const flat = note.replace(/\s+/g, ' ').trim();
+    if (!flat) return undefined;
+    return flat.length > MAX_NOTE_CHARS ? `${flat.slice(0, MAX_NOTE_CHARS - 1).trimEnd()}…` : flat;
+  };
+  if (explicit !== undefined) return clip(explicit);
+
+  const lineContent = lastLine(prefix).trim();
+  if ((languageId && PROSE_LANGUAGES.has(languageId)) || COMMENT_START.test(lineContent) || insideCommentBlock(prefix)) return undefined;
+  if ((lineContent.match(/["'`]/g)?.length ?? 0) % 2 === 1) return undefined;
+  const first = text.split('\n')[0] ?? '';
+  if (!looksLikeProse(first) || isChatter(first, lineContent) || SELF_TALK.test(first)) return undefined;
+  if (!/`[^`]+`/.test(first)) return undefined;
+  const sentence = /^(.+?)(?:[.;:](?:\s|$)|$)/.exec(first)?.[1] ?? first;
+  return clip(sentence);
+}
+
+const CLOSER_LINE = /^\s*[)\]}]+[;,]?\s*$/;
+
 function limitLines(text: string, maxLines: number): string {
   const lines = text.split('\n');
-  const limit = Math.max(1, maxLines) + (lines[0] === '' ? 1 : 0);
+  let limit = Math.max(1, maxLines) + (lines[0] === '' ? 1 : 0);
   if (lines.length <= limit) return text;
-  return lines.slice(0, limit).join('\n');
+  let kept = lines.slice(0, limit).join('\n');
+  while (limit < lines.length && CLOSER_LINE.test(lines[limit] as string) && unclosedOpeners(kept) > 0) {
+    kept += `\n${lines[limit]}`;
+    limit++;
+  }
+  return kept;
 }
 
 export function postprocess(input: PostprocessInput): string {
@@ -475,8 +588,10 @@ export function postprocess(input: PostprocessInput): string {
   const tabSize = Math.max(1, indent.tabSize);
 
   let text = input.raw.replace(/\r\n?/g, '\n');
+  if (isAside(text, input.languageId)) return '';
   text = extractMarkedAnswer(text);
   text = stripCodeFences(text, lineContent).replace(/<cursor\s*\/>/g, '');
+  text = cutAtFormatTag(text, input.languageId);
   if (PROMPT_ECHO.test(text)) return '';
   text = removeStrayClosingTag(text, input.languageId);
   text = text.replace(/^(?:\\[st])+/, '');
@@ -494,8 +609,10 @@ export function postprocess(input: PostprocessInput): string {
     const blankLead = /^(?:[ \t]*\n)+/.exec(text);
     if (blankLead) {
       text = '\n' + text.slice(blankLead[0].length);
+    } else if (startsOnNextLine(text, linePrefix, suffix, input)) {
+      text = '\n' + text;
     } else {
-      if (/\s$/.test(linePrefix)) text = text.replace(/^[ \t]+/, '');
+      text = /\s$/.test(linePrefix) ? text.replace(/^[ \t]+/, '') : text.replace(/^\t+/, '');
       text = removePrefixOverlap(text, linePrefix);
       text = removeRestatedOpener(text, linePrefix, input.languageId);
     }

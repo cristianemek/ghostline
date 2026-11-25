@@ -2,7 +2,7 @@
   "name": "ghostline",
   "displayName": "ghostline",
   "description": "Autocompletado inline (texto fantasma) con tu agente de IA: usa la CLI que ya tienes instalada. De momento, Claude Code.",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "icon": "resources/icon.png",
   "galleryBanner": {
     "color": "#1e1e2e",
@@ -110,6 +110,12 @@
         "category": "ghostline"
       },
       {
+        "command": "ghostline.generateCommitMessage",
+        "title": "Escribir el mensaje del commit",
+        "category": "ghostline",
+        "icon": "$(ghostline-ghost)"
+      },
+      {
         "command": "ghostline.acceptEdit",
         "title": "Aplicar la corrección propuesta",
         "category": "ghostline"
@@ -189,6 +195,13 @@
             "default": true,
             "scope": "application",
             "description": "Proponer correcciones: cuando el compilador marca errores en código junto al cursor que no estás tecleando (un snippet sin rellenar, una llamada con un argumento de más), se ofrece ese bloque reescrito. Tab lo aplica y Esc lo descarta.",
+            "order": 7
+          },
+          "ghostline.changes": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "description": "Cambios: cuando lo que toca no es completar sino cambiar algo que ya está escrito (un nombre que no existe, una línea fuera del bucle que le corresponde), se propone ese cambio sobre el código en vez de sugerir código nuevo. Tab lo aplica y Esc lo descarta. Si el cambio no se puede escribir, se indica en gris al final de la línea.",
             "order": 7
           },
           "ghostline.disabledLanguages": {
@@ -366,6 +379,15 @@
         }
       }
     ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "ghostline.generateCommitMessage",
+          "when": "scmProvider == git",
+          "group": "navigation@-1"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "editor.action.inlineSuggest.trigger",

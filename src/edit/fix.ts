@@ -13,6 +13,13 @@ export interface FixRegion {
 
 export const PROBLEM_WINDOW_LINES = 6;
 export const MAX_REGION_LINES = 12;
+const WORK_IN_PROGRESS =
+  /declared and not used|imported and not used|is declared but (?:its value is )?never (?:read|used)|is assigned a value but never used|is defined but never used|\bunused (?:variable|import|parameter|function|label)|never read|missing return/i;
+
+export function isWorkInProgress(message: string): boolean {
+  return WORK_IN_PROGRESS.test(message);
+}
+
 const MAX_PROBLEMS = 6;
 const MAX_MESSAGE_CHARS = 160;
 const MAX_GROWTH_LINES = 8;
@@ -109,6 +116,63 @@ export function parseFix(answer: string, original: readonly string[], languageId
   return same ? undefined : lines;
 }
 
+export interface Change {
+  oldLines: string[];
+  newLines: string[];
+}
+
+const CHANGE = /<change>\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>/i;
+const CHANGE_LINES_BEFORE = 40;
+const CHANGE_LINES_AFTER = 20;
+
+function blockLines(block: string): string[] {
+  const text = block.replace(/\r\n?/g, '\n').replace(/^[ \t]*\n/, '').replace(/\n[ \t]*$/, '');
+  return text.trim() === '' ? [] : text.split('\n').map((line) => line.replace(/\s+$/, ''));
+}
+
+export function parseChange(answer: string): Change | undefined {
+  const found = CHANGE.exec(answer);
+  if (!found) return undefined;
+  const oldLines = blockLines(found[1] ?? '');
+  const newLines = blockLines(found[2] ?? '');
+  if (oldLines.length === 0 || oldLines.length > MAX_REGION_LINES) return undefined;
+  if (newLines.length > oldLines.length + MAX_GROWTH_LINES) return undefined;
+  if (oldLines.join('\n') === newLines.join('\n')) return undefined;
+  return { oldLines, newLines };
+}
+
+export function locateChange(lineAt: (line: number) => string, lineCount: number, cursorLine: number, oldLines: readonly string[]): FixRegion | undefined {
+  const wanted = oldLines.map((line) => line.trim());
+  if (wanted.join('').length < 3) return undefined;
+  const last = Math.min(lineCount - wanted.length, cursorLine + CHANGE_LINES_AFTER);
+  let best: FixRegion | undefined;
+  let bestDistance = Infinity;
+  for (let start = Math.max(0, cursorLine - CHANGE_LINES_BEFORE); start <= last; start++) {
+    if (!wanted.every((line, offset) => lineAt(start + offset).trim() === line)) continue;
+    const end = start + wanted.length - 1;
+    const distance = cursorLine < start ? start - cursorLine : cursorLine > end ? cursorLine - end : 0;
+    if (distance < bestDistance) {
+      best = { startLine: start, endLine: end };
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+export function changedLines(current: readonly string[], change: Change): string[] | undefined {
+  const indentOf = (lines: readonly string[]): string => leadingWhitespace(lines.find((line) => line.trim() !== '') ?? '');
+  const wanted = indentOf(current);
+  const given = indentOf(change.oldLines);
+  const lines = change.newLines.map((line) => {
+    if (line.trim() === '') return '';
+    return (wanted !== given && line.startsWith(given) ? wanted + line.slice(given.length) : line).replace(/\s+$/, '');
+  });
+  const depth = (list: readonly string[]): number => list.reduce((sum, line) => sum + depthChange(line), 0);
+  if (depth(lines) !== depth(current)) return undefined;
+  const same = lines.length === current.length && lines.every((line, index) => line === (current[index] as string).replace(/\s+$/, ''));
+  return same ? undefined : lines;
+}
+
 export interface Hunk {
   oldStart: number;
   oldCount: number;
@@ -150,6 +214,33 @@ export function diffLines(oldLines: readonly string[], newLines: readonly string
     }
   }
   return hunks;
+}
+
+export interface Span {
+  start: number;
+  end: number;
+  text: string;
+}
+
+const MAX_LINE_TOKENS = 160;
+const MAX_SPANS = 4;
+
+export function lineSpans(before: string, after: string): Span[] | undefined {
+  const tokens = (line: string): string[] => line.match(/[\p{L}\p{N}_$]+|\s+|[^\p{L}\p{N}_$\s]/gu) ?? [];
+  const old = tokens(before);
+  const next = tokens(after);
+  if (old.length > MAX_LINE_TOKENS || next.length > MAX_LINE_TOKENS) return undefined;
+  const offsets = [0];
+  for (const token of old) offsets.push((offsets.at(-1) as number) + token.length);
+  const hunks = diffLines(old, next);
+  if (hunks.length === 0 || hunks.length > MAX_SPANS) return undefined;
+  const spans = hunks.map((hunk) => ({
+    start: offsets[hunk.oldStart] as number,
+    end: offsets[hunk.oldStart + hunk.oldCount] as number,
+    text: hunk.newLines.join(''),
+  }));
+  if (spans.some((span) => before.slice(span.start, span.end).trim() === '' && span.text.trim() === '')) return undefined;
+  return spans;
 }
 
 const MAX_PREVIEW_CHARS = 160;

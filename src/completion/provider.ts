@@ -12,12 +12,24 @@ import type { UsageTracker } from '../usage/usageTracker';
 import { FailureBreaker } from './breaker';
 import { LruCache, Typeahead, completionKey, type DocumentReader } from './cache';
 import type { LearningHooks, SuggestionInfo } from './hooks';
-import { insertionFromLine, insertionSoFar, postprocess, shouldStopEarly, trimAgainstSuffix, type IndentStyle } from './postprocess';
+import {
+  bareInsertion,
+  insertionFromLine,
+  insertionSoFar,
+  isAside,
+  noteFrom,
+  postprocess,
+  shouldStopEarly,
+  trimAgainstSuffix,
+  type IndentStyle,
+} from './postprocess';
+import { parseChange, type Change } from '../edit/fix';
 import { DEFAULT_LIMITS, buildPrompt } from './promptBuilder';
 import {
   TypingRate,
   agreesWithTyping,
   classifyContext,
+  closesBlock,
   cursorAllowsAuto,
   debounceDelay,
   eagerDelay,
@@ -64,6 +76,8 @@ export interface ProviderDeps {
   symbols?: SymbolProvider;
   journal?: SuggestionJournal;
   projectContextChars?(): number;
+  onNote?(document: vscode.TextDocument, position: vscode.Position, note: string): void;
+  onChange?(document: vscode.TextDocument, position: vscode.Position, change: Change, id: number): 'shown' | 'none' | { note: string };
 }
 
 interface LiveSuggestion extends SuggestionInfo {
@@ -309,6 +323,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
         if (!config.midLine || !justTyped || !midLineAllowsAuto(linePrefix, restOfLine)) return undefined;
       }
       if (context.selectedCompletionInfo) return undefined;
+      if (closesBlock(linePrefix, restOfLine)) return undefined;
       if (config.adaptiveTrigger && deps.learning?.isSuppressed(languageId, triggerContext)) return undefined;
     }
 
@@ -405,7 +420,7 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
         shouldStop: (text) => {
           launched.partial = text;
           for (const notify of launched.onPartial) notify();
-          if (singleLine && /\S[^\n]*\n/.test(text)) return true;
+          if (singleLine && !isAside(text, languageId) && /\S[^\n]*\n/.test(text)) return true;
           return shouldStopEarly(text, { maxLines: config.maxLines, prefix: built.prefix, languageId });
         },
       });
@@ -435,9 +450,14 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       }
       this.breaker.success();
 
+      const change = isAside(outcome.text, languageId) ? parseChange(outcome.text) : undefined;
+      const note = change ? undefined : noteFrom(outcome.text, built.prefix, languageId);
       const answer = singleLine ? (/^\s*\S[^\n]*/.exec(outcome.text)?.[0] ?? '') : outcome.text;
+      const inLine = built.line
+        ? insertionFromLine(outcome.text, built.line.before, built.line.after) || bareInsertion(outcome.text, built.line.before, built.line.after)
+        : answer;
       let text = postprocess({
-        raw: built.line ? insertionFromLine(outcome.text, built.line.before, built.line.after) : answer,
+        raw: change || note ? '' : inLine,
         prefix: built.prefix,
         suffix: built.suffix,
         maxLines: config.maxLines,
@@ -447,6 +467,19 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
       if (codeAfter) {
         text = text.split('\n')[0] ?? '';
         if (!text.trim()) text = '';
+      }
+      let result = text ? 'sin resolver' : 'vacía';
+      let proposed = '';
+      if (!text && config.changes && document.version === launched.documentVersion) {
+        const placed = change ? (deps.onChange?.(document, position, change, id) ?? 'none') : 'none';
+        const hint = placed !== 'shown' && placed !== 'none' ? placed.note : note;
+        if (change && placed === 'shown') {
+          result = 'cambio propuesto';
+          proposed = change.newLines.join('\n');
+        } else if (hint) {
+          result = 'aviso';
+          deps.onNote?.(document, position, hint);
+        }
       }
       deps.journal?.add({
         id,
@@ -458,16 +491,16 @@ export class GhostlineProvider implements vscode.InlineCompletionItemProvider {
         before: linePrefix,
         after: restOfLine,
         raw: outcome.text,
-        shown: text,
+        shown: text || proposed,
         hints: logEntry.hints ?? [],
-        outcome: text ? 'sin resolver' : 'vacía',
+        outcome: result,
         inputTokens: totalInputTokens(outcome.usage),
         thinkingTokens: outcome.usage.thinkingTokens,
         totalMs: outcome.totalMs,
       });
       this.cache.set(key, text);
       if (!text) {
-        deps.log(formatRequestLine(logEntry, 'vacía'));
+        deps.log(formatRequestLine(logEntry, result));
         return null;
       }
       const arrival: Arrival = { suggestion: describe(id, text), anchor: launched.anchor, tail: launched.tail, logEntry };
